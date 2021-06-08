@@ -1,0 +1,16 @@
+---
+input_meta: input.tsv 
+cwd: wrk
+ncores: 4 
+nparallel: 40 
+tmpdir: tmp 
+ref: $HG19 
+codec_root: ../../../../codecsuite/ 
+gatk3: /humgen/gsa-hpprojects/GATK/bin/GenomeAnalysisTK-3.7-0-gcfedb67/GenomeAnalysisTK.jar
+gatk4: gatk4
+mutect: /broad/software/free/Linux/redhat_7_x86_64/pkgs/mutect_1.1.7/mutect-1.1.7.jar
+sample_sheet: NA12878_codec_wgs/sample_sheet.csv 
+region_bed: ${database}/vcfs/giab/HG001/HG001_GRCh37_GIAB_highconf_CG-IllFB-IllGATKHC-Ion-10X-SOLID_CHROM1-X_v.3.3.2_highconf_nosomaticdel.bed 
+region_interval_list: ${database}/vcfs/giab/HG001/HG001_GRCh37_GIAB_highconf_CG-IllFB-IllGATKHC-Ion-10X-SOLID_CHROM1-X_v.3.3.2_highconf_nosomaticdel.interval_list 
+bcf: ${database}/vcfs/giab/HG001/HG001_GRCh37_GIAB_highconf_CG-IllFB-IllGATKHC-Ion-10X-SOLID_CHROM1-X_v.3.3.2_highconf_PGandRTGphasetransfer.bcf # bcf only use bcftools view -Ob for converting vcf to bcf
+sampleid: HG001

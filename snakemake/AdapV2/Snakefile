@@ -1,0 +1,205 @@
+import pandas as pd
+
+metadata_file = config["input_meta"]
+metadata = pd.read_csv(metadata_file, sep="\t").set_index(["batch","sample"])
+nparallel = config['nparallel'] if 'nparallel' in config else 40
+tmpdir=config['tmpdir']
+
+batch_ids, sample_names = list(zip(*metadata.index))
+batch_ids = set(batch_ids)
+sample_names = set(sample_names)
+print("batch_ids", batch_ids)
+print("sample_names", sample_names)
+
+SPLIT_OUT="split-out"
+SPLITS = [str(x+1) for x in range(nparallel)]
+
+REF= config['ref']
+CODEC_root = config['codec_root']
+
+DEMUX=f"{CODEC_root}/cmake-build-release/codec demux"
+TRIM=f"{CODEC_root}/cmake-build-release/codec trim"
+CONSENSUS_BIN=f"{CODEC_root}/cmake-build-release/codec consensus"
+ACCU_BIN=f"{CODEC_root}/cmake-build-release/codec accuracy"
+AGG_METRICS_SCRIPT=f"{CODEC_root}/snakemake/script/cds_summarize.py"
+SPLIT_SCRIPT=f"{CODEC_root}/snakemake/script/fastqsplit.pl"
+MONOMER_ERROR_SCRIPT = f"{CODEC_root}/snakemake/script/calculate_monomer_error_rate.py"
+
+JAVA_PARAMS = "-Xmx30g -Djava.io.tmpdir=/tmp"
+BWA = "bwa"
+PICARD = f"java {JAVA_PARAMS} -jar $PICARD"
+GATK = f"{config['gatk4']} --java-options \"{JAVA_PARAMS}\""
+GATK3 = f"{config['gatk3']} --java-options \"{JAVA_PARAMS}\""
+FGBIO = f"java {JAVA_PARAMS} -jar $FGBIO"
+
+DETECT_DIR="detect"
+ACCU_OUT="accu_out"
+ADAPTER_TRIM_OUT="adap_trimmed"
+TRIM_MAPPED="mapped"
+Metrics_OUT="metrics"
+
+workdir: config["cwd"]
+
+batch_to_fastq = metadata.reset_index().groupby('batch').agg({'fastq1' : set, 'fastq2': set})
+print(batch_to_fastq)
+rule SplitFastq1:
+    input:
+         lambda wildcards: batch_to_fastq.loc[wildcards.id]['fastq1']
+    params:
+          nsplit = nparallel,
+          prefix = "tmp/{id}_split_r1"
+    output:
+          tmp = "tmp/{id}.1.fastq",
+          splitbed = temp(expand("tmp/{{id}}_split_r1.{ss}.fastq", ss = SPLITS)),
+    shell:
+         """
+         zcat {input} > {output.tmp} && {SPLIT_SCRIPT} {output.tmp} {params.prefix} {params.nsplit}
+         """
+
+rule SplitFastq2:
+    input:
+         lambda wildcards: batch_to_fastq.loc[wildcards.id]['fastq2']
+    params:
+          nsplit = nparallel,
+          prefix = "tmp/{id}_split_r2"
+    output:
+          tmp = temp("tmp/{id}.2.fastq"),
+          splitbed = temp(expand("tmp/{{id}}_split_r2.{ss}.fastq", ss = SPLITS)),
+    shell:
+         """
+         zcat {input} > {output.tmp} && {SPLIT_SCRIPT} {output.tmp} {params.prefix} {params.nsplit}
+         """
+
+rule Demux:
+    input:
+         read1 = "tmp/{batch_id}_split_r1.{ss}.fastq",
+         read2 = "tmp/{batch_id}_split_r2.{ss}.fastq",
+    output:
+         read1 = temp(expand("demux/{{batch_id}}_split.{{ss}}.{index}.1.fastq.gz", index = sample_names)),
+         read2 = temp(expand("demux/{{batch_id}}_split.{{ss}}.{index}.2.fastq.gz", index = sample_names)),
+         log = "demux/{batch_id}_split.{ss}.log",
+    params:
+        sample_sheet = config['sample_sheet'],
+        outprefix = "demux/{batch_id}_split.{ss}",
+        ref = {REF}
+    shell:
+        """
+            {DEMUX} -1 {input.read1} -2 {input.read2} -p {params.sample_sheet} -o {params.outprefix} -r {params.ref}  > {output.log}
+        """
+
+rule Trim:
+    input:
+        read1 = "demux/{batch_id}_split.{ss}.{index}.1.fastq.gz",
+        read2 = "demux/{batch_id}_split.{ss}.{index}.2.fastq.gz"
+    output:
+        highconf = temp("adap_trimmed/{batch_id}_split.{ss}.{index}.highconf.bam"),
+        lowconf = temp("adap_trimmed/{batch_id}_split.{ss}.{index}.lowconf.bam"),
+        singleinsert = temp("adap_trimmed/{batch_id}_split.{ss}.{index}.singleinsert.bam"),
+        single_lowconf = temp("adap_trimmed/{batch_id}_split.{ss}.{index}.single_lowconf.bam"),
+        singleton = temp("adap_trimmed/{batch_id}_split.{ss}.{index}.singleton.bam"),
+        trimone = temp("adap_trimmed/{batch_id}_split.{ss}.{index}.trimone.bam"),
+        untrimboth = temp("adap_trimmed/{batch_id}_split.{ss}.{index}.untrimboth.bam"),
+        lost = temp("adap_trimmed/{batch_id}_split.{ss}.{index}.lost.bam"),
+        log = "adap_trimmed/{batch_id}_split.{ss}.{index}.trim.log",
+    params:
+        adap_type = "custom_primer_v2",
+        outprefix = "adap_trimmed/{batch_id}_split.{ss}.{index}",
+        rgsm = "{index}"
+    resources:
+        mem = 4,
+    wildcard_constraints:
+        index = "[0-9a-zA-Z_]+"
+    shell:
+        """
+            {TRIM} -1 {input.read1} -2 {input.read2} -o  {params.outprefix} -u 3 -U 3 -f 2 -t 2 -s {params.rgsm} > {output.log} 
+        """
+
+rule SortInQueryOrder:
+    input:
+         "adap_trimmed/{batch_id}_split.{ss}.{index}.{type}.bam",
+    output:
+          temp("adap_trimmed/{batch_id}_split.{ss}.{index}.{type}.querysort.bam"),
+    resources:
+        mem = 16,
+    wildcard_constraints:
+        index = "[0-9a-zA-Z_]+"
+    shell:
+        """
+        {PICARD} SortSam I={input} O={output} SO=queryname TMP_DIR={tmpdir}
+        """
+
+
+rule AlignRawTrimmed:
+    input:
+         "adap_trimmed/{batch_id}_split.{ss}.{index}.{type}.querysort.bam",
+    output:
+          fastq1 = temp("tmp/{batch_id}_split.{ss}.{index}.{type}.1.fq"),
+          fastq2 = temp("tmp/{batch_id}_split.{ss}.{index}.{type}.2.fq"),
+          tmp = temp("tmp/{batch_id}_split.{ss}.{index}.{type}.aligned_tmp.bam"),
+          bam = temp("tmp/{batch_id}_split.{ss}.{index}.{type}.aligned.bam"),
+          bai = temp("tmp/{batch_id}_split.{ss}.{index}.{type}.aligned.bai")
+    params:
+          reference = REF,
+    resources:
+             mem = 8,
+             ncores = config['ncores'],
+             runtime = 16
+    wildcard_constraints:
+          index = "[0-9a-zA-Z_]+"
+    shell:
+         """
+         {PICARD} SamToFastq \
+             I={input} \
+             FASTQ={output.fastq1} \
+             TMP_DIR={tmpdir} \
+             SECOND_END_FASTQ={output.fastq2} &&
+         {BWA} mem \
+             -K 100000000 \
+             -Y \
+             -t {resources.ncores} \
+             {params.reference} {output.fastq1} {output.fastq2} > {output.tmp} &&
+         {PICARD} MergeBamAlignment \
+             ALIGNED={output.tmp} \
+             UNMAPPED={input} \
+             O={output.bam} \
+             R={params.reference} \
+             TMP_DIR={tmpdir} \
+             CREATE_INDEX=true \
+             MAX_RECORDS_IN_RAM=200000
+         """
+
+rule CDSByProduct:
+    input:
+         trim_log = ADAPTER_TRIM_OUT + "/{batch_id}_split.{ss}.{index}.trim.log",
+         highconf_bam = "tmp/{batch_id}_split.{ss}.{index}.highconf.aligned.bam",
+    params:
+          sid = "{batch_id}"
+    output:
+          met = Metrics_OUT + "/byproduct/{batch_id}_split.{ss}.{index}.byproduct.txt"
+    wildcard_constraints:
+          index = "[0-9a-zA-Z_]+"
+    shell:
+         """
+            {AGG_METRICS_SCRIPT} --sample_id {params.sid} --trim_log {input.trim_log} \
+            --highconf_bam {input.highconf_bam} > {output.met}
+         """
+
+rule MergeSplit:
+    input:
+         bam = expand("tmp/{{batch_id}}_split.{ss}.{{index}}.highconf.aligned.bam", ss=SPLITS),
+         bai = expand("tmp/{{batch_id}}_split.{ss}.{{index}}.highconf.aligned.bai", ss=SPLITS)
+    output:
+          bam = "tmp/{batch_id}.{index}.raw.aligned.bam",
+          bai = "tmp/{batch_id}.{index}.raw.aligned.bam.bai"
+    resources:
+          mem = 4,
+          ncores = config['ncores']
+    wildcard_constraints:
+          index = "[0-9a-zA-Z_]+"
+    shell:
+         """
+         samtools merge -@ {resources.ncores} {output.bam} {input.bam} && samtools index {output.bam} -@ {resources.ncores}
+         """
+#include: "capture_wf_1/Snakefile"
+#include: "capture/Snakefile"
+

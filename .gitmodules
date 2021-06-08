@@ -1,0 +1,3 @@
+[submodule "bbcpputil"]
+	path = bbcpputil
+	url = git@github.com:broadinstitute/bbcpputil.git

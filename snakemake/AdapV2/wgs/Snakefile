@@ -1,0 +1,351 @@
+include: "../Snakefile"
+TRUTH_BCF= config['bcf']
+EAVL_REGION_BED= config['region_bed']
+EVAL_REGION_IL= config['region_interval_list']
+
+rule all:
+    input:
+         #expand(ACCU_OUT + "/{stype}/{batch_id}.{index}.error_metrics.txt", batch_id = batch_ids, index = sample_names, stype = ["consensus"]),
+         #expand(Metrics_OUT + "/{group}_merged.cds_consensus.mol_consensus.{type}_metrics.txt", group = batch_ids, type=['wgs']),
+         #expand("consensus/{index}.merged.cds_consensus.aligned.bam", index = sample_names),
+         expand(Metrics_OUT + "/{index}.merged.cds_consensus.wgs_metrics.txt",index = sample_names)
+
+rule DuplexConsensus:
+    input:
+         "tmp/{sample_id}.{index}.raw.aligned.bam",
+    output:
+         tmp =  temp("tmp/{sample_id}.{index}.consensus.tmp.bam"),
+         bam = "consensus/{sample_id}.{index}.consensus.bam"
+    resources:
+         mem = 16,
+         runtime = 16
+    shell:
+         """
+         {CONSENSUS_BIN} -b {input} -o {output.tmp} -m 60 -t -q 30 -p 1 &&
+         {PICARD} SortSam I={output.tmp} O={output.bam} SO=queryname
+         """
+
+rule AlignConsensus:
+    input:
+         "consensus/{sample_id}.{index}.consensus.bam"
+    output:
+          fastq1 = temp("tmp/{sample_id}.{index}.1.fq"),
+          fastq2 = temp("tmp/{sample_id}.{index}.2.fq"),
+          tmp = temp("tmp/{sample_id}.{index}.aligned_tmp.bam"),
+          bam = "consensus/{sample_id}.{index}.consensus.aligned.bam",
+          bai = "consensus/{sample_id}.{index}.consensus.aligned.bai"
+    params:
+          reference = REF,
+    resources:
+             mem = 8,
+             ncores = config['ncores'],
+             runtime = 16
+    shell:
+         """
+         {PICARD} SamToFastq \
+             I={input} \
+             FASTQ={output.fastq1} \
+             SECOND_END_FASTQ={output.fastq2} &&
+         {BWA} mem \
+             -K 100000000 \
+             -Y \
+             -t {resources.ncores} \
+             {params.reference} {output.fastq1} {output.fastq2} > {output.tmp} &&
+         {PICARD} MergeBamAlignment \
+             ALIGNED={output.tmp} \
+             UNMAPPED={input} \
+             O={output.bam} \
+             R={params.reference} \
+             TMP_DIR={tmpdir} \
+             CREATE_INDEX=true \
+             MAX_RECORDS_IN_RAM=5000000
+         """
+
+rule RawErrorMetrics:
+    input:
+         bam = "tmp/{sample_id}.{index}.raw.aligned.bam",
+    output:
+          accu = ACCU_OUT + "/raw/{sample_id}.{index}.error_metrics.txt",
+          error = ACCU_OUT + "/raw/{sample_id}.{index}.mutant_families.txt",
+          known = ACCU_OUT + "/raw/{sample_id}.{index}.known_var.txt",
+          readlevel = ACCU_OUT + "/raw/{sample_id}.{index}.readlevel.txt",
+    params:
+          ref = REF,
+          mapq = 60,
+          baseq = 0,
+          high_conf_region = EAVL_REGION_BED,
+          germ_vcf = TRUTH_BCF,
+          vcf_sid = "HG001"
+    resources:
+             mem = 8,
+             runtime = 96
+    shell:
+         """
+            {ACCU_BIN}  -b {input.bam} \
+                -L {params.high_conf_region} \
+                -m {params.mapq} \
+                -r {params.ref} \
+                -V {params.germ_vcf} \
+                -s {params.vcf_sid} \
+                -p 50 \
+                -O \
+                -q {params.baseq} \
+                -a {output.accu} \
+                -e {output.error} \
+                -k {output.known} \
+                --read_level_stat {output.readlevel}
+         """
+
+rule CDSErrorMetrics:
+    input:
+         bam = "consensus/{sample_id}.{index}.consensus.aligned.bam",
+    output:
+          accu = ACCU_OUT + "/consensus/{sample_id}.{index}.error_metrics.txt",
+          error = ACCU_OUT + "/consensus/{sample_id}.{index}.mutant_families.txt",
+          known = ACCU_OUT + "/consensus/{sample_id}.{index}.known_var.txt",
+    params:
+          ref = REF,
+          mapq = 60,
+          baseq = 30,
+          high_conf_region = EAVL_REGION_BED,
+          germ_vcf = TRUTH_BCF,
+          vcf_sid = config['sampleid']
+    resources:
+             mem = 8,
+             runtime = 96
+    shell:
+         """
+            {ACCU_BIN}  -b {input.bam} \
+                -L {params.high_conf_region} \
+                -m {params.mapq} \
+                -r {params.ref} \
+                -V {params.germ_vcf} \
+                -s {params.vcf_sid} \
+                -x 2 \
+                -p 0 \
+                -d 12 \
+                -q {params.baseq} \
+                -a {output.accu} \
+                -e {output.error} \
+                -k {output.known}
+         """
+
+#group_to_samples = metadata.reset_index().groupby('group_id').sample.agg(list)
+#print(group_to_samples)
+rule MergeGroup:
+    input:
+         lambda wildcard: expand("consensus/{id}.{{index}}.consensus.aligned.bam", id = batch_ids)
+    output:
+          bam = temp("consensus/{index}.merged.cds_consensus.aligned.bam")
+    resources:
+             mem = 8,
+             ncores = config['ncores'],
+             runtime = 16,
+    shell:
+         """
+         samtools merge -@ {resources.ncores} {output.bam} {input} && samtools index {output.bam} -@ {resources.ncores}
+         """
+
+# rule MergeAll:
+#     input:
+#          expand("consensus/{index}.merged.cds_consensus.aligned.bam", index=metadata.index.unique())
+#     output:
+#          bam = temp("consensus/{all}.merged.cds_consensus.tmp.bam")
+#     resources:
+#              mem = 8,
+#              ncores = config['ncores'],
+#              runtime = 16,
+#     shell:
+#          """
+#          samtools merge -@ {resources.ncores} {output.bam} {input} && samtools index {output.bam}
+#          """
+
+rule ReplaceReadGroup:
+    input:
+       "consensus/{index}.merged.cds_consensus.aligned.bam"
+    output:
+       "consensus/{index}.merged.cds_consensus.replacerg.bam"
+    params:
+        sid = "{index}"
+    resources:
+        mem = 24,
+        runtime = 16,
+    shell:
+        """
+        {PICARD} AddOrReplaceReadGroups \
+           I={input} \
+           O={output} \
+           CREATE_INDEX=true \
+           RGID=4 \
+           RGLB=lib1 \
+           RGPL=ILLUMINA \
+           RGPU=unit1 \
+           RGSM={params.sid}
+        """
+
+rule MarkDuplicates:
+    input:
+        bam = "consensus/{index}.merged.cds_consensus.replacerg.bam"
+    resources:
+        mem = 32,
+        runtime = 16,
+    output:
+        bam = "consensus/{index}.merged.cds_consensus.replacerg.markdup.bam",
+        met = "metrics/{index}.marked_duplicates.txt"
+    shell:
+        """
+        {PICARD} MarkDuplicates I={input.bam} O={output.bam} M={output.met} CREATE_INDEX=true
+        """
+
+# rule GroupReadByUMI:
+#     input:
+#          "consensus/{index}.merged.cds_consensus.replacerg.bam"
+#     output:
+#           bam = "groupbyumi/{index}.merged.cds_consensus.GroupedByUmi.bam",
+#           histogram = Metrics_OUT + "/{index}.merged.cds_consensus.umiHistogram.txt"
+#     resources:
+#              mem = 16,
+#              runtime = 32
+#     shell:
+#          """
+#          {FGBIO} GroupReadsByUmi \
+#              -i {input} \
+#              -o {output.bam} \
+#              -f {output.histogram} \
+#              --strategy=Paired \
+#          """
+
+# rule CallMolecularConsensusReads:
+#     input:
+#          "groupbyumi/{merged_id}.merged.cds_consensus.GroupedByUmi.bam",
+#     output:
+#          "tmp/{merged_id}.merged.cds_consensus.mol_consensus.bam"
+#     params:
+#           rg = "{merged_id}"
+#     resources:
+#              mem = 12,
+#              runtime = 36
+#     shell:
+#          """
+#
+#          {FGBIO} CallMolecularConsensusReads \
+#              -i {input} \
+#              -o {output} \
+#              -p {params.rg} \
+#              -M 1
+#          """
+#
+# rule AlignMolecularConsensusReads:
+#     input:
+#          "tmp/{merged_id}.merged.cds_consensus.mol_consensus.bam"
+#     output:
+#           fastq1 = temp("tmp/{merged_id}_1.fq"),
+#           fastq2 = temp("tmp/{merged_id}_2.fq"),
+#           tmp = temp("tmp/{merged_id}.mol_consensus.aligned_tmp.bam"),
+#           bam = "consensus/{merged_id}.merged.cds_consensus.mol_consensus.aligned.bam",
+#           bai = "consensus/{merged_id}.merged.cds_consensus.mol_consensus.aligned.bai"
+#     params:
+#           reference = REF,
+#     resources:
+#              mem = 12,
+#              runtime = 32,
+#              ncores = config['ncores']
+#     shell:
+#          """
+#          {PICARD} SamToFastq \
+#              I={input} \
+#              FASTQ={output.fastq1} \
+#              SECOND_END_FASTQ={output.fastq2} &&
+#
+#          {BWA} mem \
+#              -K 100000000 \
+#              -t {resources.ncores} \
+#              -Y \
+#              {params.reference} {output.fastq1} {output.fastq2} > {output.tmp} &&
+#
+#          {PICARD} MergeBamAlignment \
+#              ALIGNED={output.tmp} \
+#              UNMAPPED={input} \
+#              O={output.bam} \
+#              CREATE_INDEX=true \
+#              MAX_RECORDS_IN_RAM=5000000 \
+#              TMP_DIR={tmpdir} \
+#              R={params.reference}
+#          """
+
+rule CollectWgsMetrics:
+    input:
+         bam = "consensus/{index}.merged.cds_consensus.replacerg.markdup.bam",
+    output:
+          metrics = Metrics_OUT + "/{index}.merged.cds_consensus.wgs_metrics.txt",
+    params:
+          ref = REF,
+          itl = EVAL_REGION_IL
+    shell:
+         """
+         {PICARD} CollectWgsMetrics I={input.bam} O={output.metrics} R={params.ref} INTERVALS={params.itl} INCLUDE_BQ_HISTOGRAM=true \
+             MINIMUM_MAPPING_QUALITY=30 MINIMUM_BASE_QUALITY=30
+         """
+
+# rule DeepTools:
+#     input:
+#          bam = "consensus/{merged_id}.merged.cds_consensus.mol_consensus.aligned.bam",
+#     output:
+#          met =  Metrics_OUT + "/{merged_id}.covmetrics.txt",
+#          plot = Metrics_OUT + "/{merged_id}.covplot.png"
+#     params:
+#           high_conf_region = EAVL_REGION_BED,
+#     resources:
+#           mem = 48,
+#           runtime = 24,
+#     shell:
+#         """
+#         plotCoverage -b {input.bam} -o {output.plot} --outCoverageMetrics {output.met} -ct 1 -ct 2 -ct 3 -ct 4 -ct 5 -ct 6 -ct 7 -ct 8 -ct 9 -ct 10 --BED {params.high_conf_region}
+#         """
+
+# rule SamDepth:
+#     input:
+#         bam = "consensus/{merged_id}.merged.cds_consensus.mol_consensus.aligned.bam",
+#     output:
+#         Metrics_OUT + "/{merged_id}_merged.cds_consensus.mol_consensus.covmetric.txt"
+#     resources:
+#        mem = 8,
+#        runtime = 24,
+#        ncores = config['ncores']
+#     params:
+#        high_conf_region = EAVL_REGION_BED,
+#     shell:
+#         """
+#         sambamba depth base {input} \
+#             -L {params.high_conf_region} \
+#             --min-coverage=0 \
+#             --min-base-quality=30 \
+#             -t {resources.ncores} \
+#             -F "mapping_quality >= 30" \
+#             -m \
+#             --combined 2>/dev/null \
+#             | cut -f 1-3 \
+#             | ../../../script/cov_sum.py > {output}
+#         """
+# rule CollectAlignmentSummaryMetrics:
+#     input:
+#          bam = "tmp/{id}.cds.raw.aligned.bam"
+#     output:
+#           metrics = Metrics_OUT + "/{id}.cds.raw.alignment_metrics.txt",
+#     params:
+#           ref = REF
+#     shell:
+#          """
+#          {PICARD} CollectAlignmentSummaryMetrics I={input.bam} O={output.metrics} R={params.ref}
+#          """
+
+# rule CollectInsertSizeMetrics:
+#     input:
+#          bam = "consensus/{merged_id}.merged.consensus.mol_consensus.aligned.bam",
+#     output:
+#           txt = Metrics_OUT + "/{merged_id}_merged.raw.insert_size_metrics.txt",
+#           hist = Metrics_OUT + "/{merged_id}_merged.raw.insert_size_histogram.pdf"
+#     shell:
+#          """
+#          {PICARD} CollectInsertSizeMetrics I={input.bam} O={output.txt} H={output.hist} M=0.5 W=600 DEVIATIONS=100
+#          """

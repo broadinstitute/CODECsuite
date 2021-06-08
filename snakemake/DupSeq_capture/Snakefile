@@ -1,0 +1,934 @@
+configfile: "/xchip/bloodbiopsy/ruolin/link_duplex/dupseq/dec4_pancancer_dupseq/pip/config.yaml"
+CODEC_root = config['codec_root']
+
+import pandas as pd
+import os
+JAVA_PARAMS = "-XX:-UseGCOverheadLimit -Xmx32g -Djava.io.tmpdir=/tmp"
+HG19="/seq/references/Homo_sapiens_assembly19/v1/Homo_sapiens_assembly19.fasta"
+DBSNP = "/seq/references/Homo_sapiens_assembly19/v1/Homo_sapiens_assembly19.dbsnp.vcf"
+KNOWN_INDELS = "/seq/references/Homo_sapiens_assembly19/v1/Homo_sapiens_assembly19.known_indels.vcf"
+VARIANT_GOLD_STANDARD = "/seq/references/Homo_sapiens_assembly19/v1/Homo_sapiens_assembly19.variantEvalGoldStandard.vcf"
+
+SAMTOOLS="samtools"
+BEDTOOLS="bedtools"
+SPLIT_SCRIPT=f"{CODEC_root}/snakemake/script/fastqsplit.pl"
+MONOMER_ERROR_SCRIPT = f"{CODEC_root}/snakemake/script/calculate_monomer_error_rate.py"
+CONSENSUS_BIN=f"{CODEC_root}/cmake-build-release/codec consensus"
+ACCU_BIN=f"{CODEC_root}/cmake-build-release/codec accuracy"
+COLLECT_DUPMET = f"python {CODEC_root}/snakemake/script/collect_duplex_metrics.py"
+AGG_METRICS_SCRIPT=f"{CODEC_root}/snakemake/script/cds_summarize.py"
+
+PICARD = f"java {JAVA_PARAMS} -jar $PICARD"
+GATK = f"{config['gatk4']} --java-options \"{JAVA_PARAMS}\""
+GATK3 = f"{config['gatk3']} --java-options \"{JAVA_PARAMS}\""
+FGBIO = f"java {JAVA_PARAMS} -jar $FGBIO"
+BWA = "bwa"
+MUTECT = f"java {JAVA_PARAMS} -jar {config['mutect']}"
+mem_per_core= int(32/config['ncores'])
+
+tmpdir=config['tmpdir']
+
+merged_raw_bam_dir="merged_raw"
+miredas_dir = "miredas"
+GROUP_BY_UMI_DIR = "group_by_umi"
+Metrics_OUT="metrics"
+CONSENSUS_OUT="dsc"
+DETECT_DIR="detect"
+
+metadata_file = config["input_meta"]
+metadata = pd.read_csv(metadata_file, sep="\t").set_index("sample_id")
+ctdna_names = metadata[metadata['dna_type'] == 'ctDNA'].index.tolist()
+
+##Functions
+def get_files_from_config(column_name):
+    """ Extract files from metadata """
+    return lambda wildcards: metadata.loc[wildcards.sample_id][column_name]
+
+workdir: config["cwd"]
+
+scatter_count = 400
+SPLITS = [str(x).zfill(4) for x in range(scatter_count)]
+rule all:
+    input:
+         expand(Metrics_OUT + "/{batch_id}.{sample_id}.duplex.insert_size_histogram.pdf", sample_id=metadata.index, batch_id=metadata.id.unique()),
+         expand(Metrics_OUT + "/{batch_id}.{sample_id}.duplex_yield_metrics.txt",sample_id=metadata.index, batch_id=metadata.id.unique()),
+         expand(Metrics_OUT + "/bytarget/{batch_id}.{sample_id}.bytarget.duplex_yield_metrics.txt",sample_id=metadata.index, batch_id=metadata.id.unique()),
+         expand(Metrics_OUT + "/{batch_id}.{sample_id}.raw.hs_metrics.txt",sample_id=metadata.index, batch_id=metadata.id.unique()),
+         expand("miredas/{batch_id}.{sample_id}.dupseq_consensus_error_monomer.txt",sample_id=ctdna_names, batch_id=metadata.id.unique()),
+         expand("miredas/noeof/{batch_id}.{sample_id}.dupseq_consensus_error_monomer.txt",sample_id=ctdna_names, batch_id=metadata.id.unique()),
+         expand(DETECT_DIR + "/{batch_id}.{sample_id}.{ctype}_detect_fingerprint.txt",sample_id=ctdna_names, batch_id=metadata.id.unique(), ctype=['dsc', 'mol']),
+         expand("ssc/{batch_id}.{sample_id}.mol_consensus.filtered.bam",sample_id=metadata.index, batch_id=metadata.id.unique()),
+         expand("accu/{type}/{batch_id}.{sample_id}.error_metrics.txt",sample_id=ctdna_names, batch_id=metadata.id.unique(), type = ['raw', 'r1r2']),
+         expand("miredas/ssc/split_{splitid}.{batch_id}.{sample_id}_error_metrics.txt", sample_id=ctdna_names, batch_id=metadata.id.unique(), splitid = SPLITS),
+         expand("miredas/ssc/{batch_id}.{sample_id}.mol_consensus_error_monomer.txt",sample_id=ctdna_names, batch_id=metadata.id.unique()),
+         expand("mutect/{batch_id}.{sample_id}.duplex.call_stats.txt",sample_id=ctdna_names, batch_id=metadata.id.unique()),
+    resources:
+             runtime = 2,
+             ncores = 1
+
+rule RevertQscore:
+    input:
+         get_files_from_config('input_bam'),
+    output:
+          "tmp/{sample_id}.aligned.duplicates_marked.nobqsr.bam"
+    shell:
+         """
+         {PICARD} RevertOriginalBaseQualitiesAndAddMateCigar I={input} O={output} SO=coordinate TMP_DIR={tmpdir} CREATE_INDEX=true
+         """
+
+rule R1R2Consensus:
+    input:
+         "tmp/{sample_id}.aligned.duplicates_marked.nobqsr.bam"
+    output:
+        tmp = temp("r1r2consensus/{batch_id}.{sample_id}.r1r2consensus.tmp.bam"),
+        bam = temp("r1r2consensus/{batch_id}.{sample_id}.r1r2consensus.bam")
+    wildcard_constraints:
+        batch_id="[0-9a-zA-Z_]+",
+        sample_id="[0-9a-zA-Z_]+"
+    resources:
+        mem = 16,
+        runtime = 32
+    shell:
+        """
+        {CONSENSUS_BIN} -b {input} -o {output.tmp} -m 30 -t -q 30 -p 1 &&
+        {PICARD} SortSam I={output.tmp} O={output.bam} SO=queryname TMP_DIR={tmpdir}
+        """
+
+rule AlignConsensus:
+    input:
+         "r1r2consensus/{batch_id}.{sample_id}.r1r2consensus.bam"
+    output:
+          fastq1 = temp("tmp/{batch_id}.{sample_id}.r1r2consensus.1.fq"),
+          fastq2 = temp("tmp/{batch_id}.{sample_id}.r1r2consensus.2.fq"),
+          tmp = temp("tmp/{batch_id}.{sample_id}.r1r2consensus.aligned_tmp.bam"),
+          bam = "r1r2consensus/{batch_id}.{sample_id}.r1r2consensus.aligned.bam",
+          bai = "r1r2consensus/{batch_id}.{sample_id}.r1r2consensus.aligned.bai"
+    params:
+          reference = HG19,
+    resources:
+             mem = 12,
+             ncores = config['ncores'],
+             runtime = 24
+    wildcard_constraints:
+              batch_id="[0-9a-zA-Z_]+",
+              sample_id="[0-9a-zA-Z_]+"
+    shell:
+         """
+         {PICARD} SamToFastq \
+             I={input} \
+             FASTQ={output.fastq1} \
+             SECOND_END_FASTQ={output.fastq2} &&
+         {BWA} mem \
+             -K 100000000 \
+             -Y \
+             -t {resources.ncores} \
+             {params.reference} {output.fastq1} {output.fastq2} > {output.tmp} &&
+         {PICARD} MergeBamAlignment \
+             ALIGNED={output.tmp} \
+             UNMAPPED={input} \
+             O={output.bam} \
+             R={params.reference} \
+             TMP_DIR={tmpdir} \
+             CREATE_INDEX=true \
+             MAX_RECORDS_IN_RAM=5000000
+         """
+
+rule RawErrorMetrics:
+    input:
+         "tmp/{sample_id}.aligned.duplicates_marked.nobqsr.bam"
+    output:
+          accu = "accu/raw/{batch_id}.{sample_id}.error_metrics.txt",
+          error = "accu/raw/{batch_id}.{sample_id}.mutant_families.txt",
+          known = "accu/raw/{batch_id}.{sample_id}.known_var.txt",
+    params:
+          ref = HG19,
+          mapq = 60,
+          baseq = 30,
+          bed = get_files_from_config('bed_file'),
+          germ_bcf = get_files_from_config('germ_bcf'),
+          bcf_sid = get_files_from_config('bcf_sid')
+    resources:
+             mem = 8,
+             runtime = 96
+    shell:
+         """
+            {ACCU_BIN}  -b {input} \
+                -L {params.bed} \
+                -m {params.mapq} \
+                -r {params.ref} \
+                -V {params.germ_bcf} \
+                -s {params.bcf_sid} \
+                -n 5 \
+                -x 2 \
+                -d 12 \
+                -p 1 \
+                -O \
+                -q {params.baseq} \
+                -a {output.accu} \
+                -e {output.error} \
+                -k {output.known} \
+         """
+
+# rule DownSampleRaw:
+#     input:
+#          get_files_from_config('input_bam'),
+#     output:
+#          "raw/{batch_id}.{sample_id}.downcov.bam"
+#     params:
+#           interval = get_files_from_config('targets_interval_list'),
+#           ref = HG19
+#     shell:
+#         """
+#         {PICARD} DownsampleSam \
+#             I={input} \
+#             O={output} \
+#             STRATEGY=ConstantMemory \
+#             CREATE_INDEX=true \
+#             P=0.05
+#         """
+
+rule R1R2ErrorMetrics:
+    input:
+         "r1r2consensus/{batch_id}.{sample_id}.r1r2consensus.aligned.bam",
+    output:
+          accu = "accu/r1r2/{batch_id}.{sample_id}.error_metrics.txt",
+          error = "accu/r1r2/{batch_id}.{sample_id}.mutant_families.txt",
+          known = "accu/r1r2/{batch_id}.{sample_id}.known_var.txt",
+          readlevel = "accu/r1r2/{batch_id}.{sample_id}.readlevel.txt",
+    params:
+          ref = HG19,
+          mapq = 60,
+          baseq = 0,
+          bed = get_files_from_config('bed_file'),
+          germ_bcf = get_files_from_config('germ_bcf'),
+          bcf_sid = get_files_from_config('bcf_sid')
+    resources:
+             mem = 8,
+             runtime = 96
+    shell:
+         """
+            {ACCU_BIN}  -b {input} \
+                -L {params.bed} \
+                -m {params.mapq} \
+                -r {params.ref} \
+                -V {params.germ_bcf} \
+                -s {params.bcf_sid} \
+                -n 5 \
+                -x 2 \
+                -d 12 \
+                -q {params.baseq} \
+                -a {output.accu} \
+                -e {output.error} \
+                -k {output.known} \
+                --read_level_stat {output.readlevel}
+         """
+
+rule GroupReadByUMI:
+    input:
+         "tmp/{sample_id}.aligned.duplicates_marked.nobqsr.bam"
+    output:
+          bam = GROUP_BY_UMI_DIR + "/{batch_id}.{sample_id}.GroupedByUmi.bam",
+          histogram = Metrics_OUT + "/{batch_id}.{sample_id}.umiHistogram.txt"
+    resources:
+             mem = 16,
+             runtime = 32
+    wildcard_constraints:
+        batch_id="[0-9a-zA-Z_]+",
+        sample_id="[0-9a-zA-Z_]+"
+    shell:
+         """
+         {FGBIO} GroupReadsByUmi \
+             -i {input} \
+             -o {output.bam} \
+             -f {output.histogram} \
+             --strategy=Paired \
+         """
+
+rule CallMolecularConsensusReads:
+    input:
+         GROUP_BY_UMI_DIR + "/{batch_id}.{sample_id}.GroupedByUmi.bam",
+    output:
+          temp("tmp/{batch_id}.{sample_id}.mol_consensus.bam")
+    params:
+          rg = "{sample_id}"
+    resources:
+             mem = 12,
+             runtime = 12
+    shell:
+         """
+
+         {FGBIO} CallMolecularConsensusReads \
+             -i {input} \
+             -o {output} \
+             -p {params.rg} \
+             -M 2
+         """
+
+rule AlignMolecularConsensusReads:
+    input:
+         "tmp/{batch_id}.{sample_id}.mol_consensus.bam"
+    output:
+          fastq1 = temp("tmp/{batch_id}.{sample_id}_1.fq"),
+          fastq2 = temp("tmp/{batch_id}.{sample_id}_2.fq"),
+          tmp = temp("tmp/{batch_id}.{sample_id}.mol_consensus.aligned_tmp.bam"),
+          bam = temp("tmp/{batch_id}.{sample_id}.mol_consensus.bwa.bam"),
+          bai = temp("tmp/{batch_id}.{sample_id}.mol_consensus.bwa.bai")
+    params:
+          reference = HG19,
+    resources:
+             mem = 32,
+             runtime = 16
+    shell:
+         """
+         {PICARD} SamToFastq \
+             I={input} \
+             FASTQ={output.fastq1} \
+             SECOND_END_FASTQ={output.fastq2} &&
+ 
+         {BWA} mem \
+             -K 100000000 \
+             -Y \
+             {params.reference} {output.fastq1} {output.fastq2} > {output.tmp} &&
+ 
+         {PICARD} MergeBamAlignment \
+             ALIGNED={output.tmp} \
+             UNMAPPED={input} \
+             O={output.bam} \
+             CREATE_INDEX=true \
+             MAX_RECORDS_IN_RAM=5000000 \
+             TMP_DIR={tmpdir} \
+             R={params.reference}
+         """
+
+rule IndelRealignmentSSC:
+    input:
+         bam = "tmp/{batch_id}.{sample_id}.mol_consensus.bwa.bam",
+         bai = "tmp/{batch_id}.{sample_id}.mol_consensus.bwa.bai"
+    output:
+          bam = temp("tmp/{batch_id}.{sample_id}.mol_consensus.indel_realigned.bam"),
+          bai = temp("tmp/{batch_id}.{sample_id}.mol_consensus.indel_realigned.bai"),
+    params:
+          reference = HG19,
+          targets = lambda wildcards: metadata.loc[wildcards.sample_id]['targets_interval_list']
+    resources:
+             mem = 16,
+             runtime = 8
+    shell:
+         """
+         {GATK3} -T IndelRealigner \
+             -I {input.bam} \
+             -o {output.bam} \
+             -R {params.reference} \
+             -allowPotentiallyMisencodedQuals \
+             -targetIntervals {params.targets} \
+             -model USE_READS \
+             -known {DBSNP} \
+             -known {KNOWN_INDELS} \
+             -known {VARIANT_GOLD_STANDARD}
+         """
+
+rule FilterMolecularConsensusReads:
+    input:
+         bam = "tmp/{batch_id}.{sample_id}.mol_consensus.indel_realigned.bam",
+         bai = "tmp/{batch_id}.{sample_id}.mol_consensus.indel_realigned.bai",
+    output:
+         bam = "ssc/{batch_id}.{sample_id}.mol_consensus.filtered.bam",
+         bai = "ssc/{batch_id}.{sample_id}.mol_consensus.filtered.bai"
+    resources:
+             mem = 8,
+             runtime = 2
+    params:
+          ref = HG19
+    shell:
+         """
+             {FGBIO} FilterConsensusReads \
+                   -i {input.bam} \
+                   -r {params.ref} \
+                   -o {output.bam} \
+                   -N 20 \
+                   --max-read-error-rate 0.01 \
+                   --max-base-error-rate 0.05 \
+                   --max-no-call-fraction 0.05 \
+                   -M 2 \
+                   --min-mean-base-quality 20 \
+                   -R \
+         """
+
+rule CollectAllSSCBamAndGermVcfs:
+    input:
+         expand("ssc/{batch_id}.{sample_id}.mol_consensus.filtered.bam", batch_id = metadata.id.unique(), sample_id = metadata.index.unique()),
+         expand("vcf/{batch_id}.{sample_id}_germ.vcf.gz", batch_id = metadata.id.unique(), sample_id = metadata.index.unique())
+    wildcard_constraints:
+                        batch_id="[0-9a-zA-Z_]+",
+                        sample_id="[0-9a-zA-Z_]"
+    output:
+          "tmp/ssc_bookmark.txt"
+    shell:
+         """
+         echo "done ssc" > {output}
+         """
+
+rule SplitInterval:
+    input:
+         metadata['targets_interval_list'].unique()
+    output:
+        expand("splitinterval/{id}-scattered.interval_list", id = SPLITS)
+    params:
+          output = "splitinterval",
+          ref = HG19,
+          dict = "/seq/references/Homo_sapiens_assembly19/v1/Homo_sapiens_assembly19.dict"
+    shell:
+         """
+         {GATK} SplitIntervals -R {params.ref} -O {params.output} -L {input} --scatter-count {scatter_count} 
+         """
+
+rule DetectFingerprintSSC:
+    input:
+         bam = "ssc/{batch_id}.{sample_id}.mol_consensus.filtered.bam",
+         bm = "tmp/ssc_bookmark.txt"
+    output:
+          detect = DETECT_DIR + "/{batch_id}.{sample_id}.mol_detect_fingerprint.txt",
+          families = DETECT_DIR + "/{batch_id}.{sample_id}.mol_detect_families.txt"
+    params:
+          ref = HG19,
+          mut_maf = lambda wildcards: metadata.loc[wildcards.sample_id]['maf_file'],
+          normal_bam = lambda wildcards, input: input[0].replace('ctDNA', 'gDNA'),
+    resources:
+             mem = 4,
+             runtime = 2
+    wildcard_constraints:
+            batch_id="[0-9a-zA-Z_]+",
+            sampld_id="[0-9a-zA-Z_]+ctDNA"
+    shell:
+         """
+         miredas DetectFingerprint \
+             -r {params.ref} \
+             -b {input.bam} \
+             -m {params.mut_maf} \
+             -o {output.detect} \
+             --min_base_quality 44 \
+             --mutant_families_outfile {output.families} \
+         """
+
+rule SSCErrorMetrics2:
+    input:
+         bam = "ssc/{batch_id}.{sample_id}.mol_consensus.filtered.bam",
+         germ_vcf = "vcf/{batch_id}.{sample_id}_germ.vcf.gz",
+         bm = "tmp/ssc_bookmark.txt",
+         interval_list = "splitinterval/{splitid}-scattered.interval_list",
+    output:
+          temp("miredas/ssc/split_{splitid}.{batch_id}.{sample_id}_error_metrics.txt"),
+          temp("miredas/ssc/split_{splitid}.{batch_id}.{sample_id}_mutant_families.txt"),
+          temp("miredas/ssc/split_{splitid}.{batch_id}.{sample_id}_trinucleotide_context.txt")
+    params:
+          normal_bam = lambda wildcards, input: input[0].replace('ctDNA', 'gDNA'),
+          germ_vcf = lambda wildcards, input: input[1].replace('ctDNA', 'gDNA'),
+          batch_id = "{batch_id}.{sample_id}",
+          output = "miredas/ssc/split_{splitid}.{batch_id}.{sample_id}",
+          mut_maf = get_files_from_config('maf_file'),
+          ref = HG19,
+          max_af = 1.0,
+    wildcard_constraints:
+          batch_id="[0-9a-zA-Z_]+",
+          sample_id="[0-9a-zA-Z_]+ctDNA",
+          split_id="[0-9]+"
+    resources:
+             mem = 32,
+             runtime = 2
+    shell:
+         """
+         miredas CollectErrorMetrics2 \
+             -b {input.bam} \
+             -n {params.normal_bam} \
+             -s {params.batch_id} \
+             -m {params.mut_maf} \
+             -i {input.interval_list} \
+             -r {params.ref} \
+             --output_mutant_families \
+             --het_vcf {params.germ_vcf} \
+             --max_af {params.max_af} \
+             --min_base_quality 44 \
+            -o {params.output} \
+         """
+
+rule AGG_SplitErrorMetric:
+    input:
+         metrics = expand("miredas/ssc/split_{splitid}.{{batch_id}}.{{sample_id}}_error_metrics.txt", splitid = SPLITS),
+         families = expand("miredas/ssc/split_{splitid}.{{batch_id}}.{{sample_id}}_mutant_families.txt", splitid = SPLITS),
+         tncs = expand("miredas/ssc/split_{splitid}.{{batch_id}}.{{sample_id}}_trinucleotide_context.txt", splitid = SPLITS),
+    output:
+          "miredas/ssc/{batch_id}.{sample_id}.mol_consensus_error_metrics.txt",
+          "miredas/ssc/{batch_id}.{sample_id}.mol_consensus_trinucleotide_context.txt",
+          "miredas/ssc/{batch_id}.{sample_id}.mol_consensus_mutant_families.txt"
+    params:
+          outprefix = "miredas/ssc/{batch_id}.{sample_id}.mol_consensus"
+    wildcard_constraints:
+          batch_id="[0-9a-zA-Z_]+",
+          sample_id="[0-9a-zA-Z_]+ctDNA"
+    shell:
+        """
+            ../../../script/agg_miredas.py -e {input.metrics} -t {input.tncs} --m {input.families} -o {params.outprefix}
+        """
+
+
+rule SSC_GetContextErrorRate:
+    input:
+         mutfam = "miredas/ssc/{batch_id}.{sample_id}.mol_consensus_mutant_families.txt",
+         tnd = "miredas/ssc/{batch_id}.{sample_id}.mol_consensus_trinucleotide_context.txt"
+    output:
+          "miredas/ssc/{batch_id}.{sample_id}.mol_consensus_error_monomer.txt",
+    wildcard_constraints:
+                        batch_id="[0-9a-zA-Z_]+",
+                        sample_id="[0-9a-zA-Z_]+ctDNA"
+    shell:
+         """
+            ../../../script/calculate_monomer_error_rate.py --tnd  {input.tnd} --mutfam {input.mutfam} > {output}
+         """
+
+rule CallDuplexConsensusReads:
+    input:
+        GROUP_BY_UMI_DIR + "/{batch_id}.{sample_id}.GroupedByUmi.bam"
+    output:
+        dsc = temp("tmp/{batch_id}.{sample_id}.DSC.consensus.bam"),
+    params:
+        sample = "{sample_id}"
+    resources:
+        mem = 12,
+        runtime = 12
+    shell:
+        """
+
+          {FGBIO} CallDuplexConsensusReads \
+              -p {params.sample} \
+              -i {input} \
+              -o {output.dsc} \
+              --min-reads 2
+       """
+
+
+rule AlignDuplexConsensus:
+    input:
+        "tmp/{batch_id}.{sample_id}.DSC.consensus.bam"
+    output:
+        fastq1 = temp("tmp/{batch_id}.{sample_id}_DSC_1.fq"),
+        fastq2 = temp("tmp/{batch_id}.{sample_id}_DSC_2.fq"),
+        trimfastq1 = temp("tmp/{batch_id}.{sample_id}_DSC_1.trim.fq"),
+        trimfastq2 = temp("tmp/{batch_id}.{sample_id}_DSC_2.trim.fq"),
+        tmp = temp("tmp/{batch_id}.{sample_id}.DSC.aligned_tmp.bam"),
+        json = temp("tmp/{batch_id}.{sample_id}.json"),
+        html = temp("tmp/{batch_id}.{sample_id}.html"),
+        bam = "tmp/{batch_id}.{sample_id}.duplex_consensus.aligned.bam",
+        bai = "tmp/{batch_id}.{sample_id}.duplex_consensus.aligned.bai"
+    params:
+        reference = HG19
+    resources:
+        mem = 12,
+        runtime = 16,
+        ncores = config['ncores'],
+    shell:
+        """
+        {PICARD} SamToFastq \
+            I={input} \
+            FASTQ={output.fastq1} \
+            SECOND_END_FASTQ={output.fastq2} &&
+        fastp -i {output.fastq1} \
+              -I {output.fastq2} \
+              -Q \
+              -A \
+              -t 1 \
+              -T 1 \
+              -o {output.trimfastq1} \
+              -O {output.trimfastq2} \
+              --json {output.json} \
+              --html {output.html}  &&
+        {BWA} mem \
+            -K 100000000 \
+            -Y \
+            -t {resources.ncores} \
+            {params.reference} {output.trimfastq1} {output.trimfastq2} > {output.tmp} &&
+        {PICARD} MergeBamAlignment \
+            ALIGNED={output.tmp} \
+            UNMAPPED={input} \
+            O={output.bam} \
+            R={params.reference} \
+            TMP_DIR={tmpdir} \
+            CREATE_INDEX=true \
+            MAX_RECORDS_IN_RAM=5000000
+        """
+
+rule IndelRealignment:
+    input:
+         "tmp/{batch_id}.{sample_id}.duplex_consensus.aligned.bam"
+    output:
+          bam =  "tmp/{batch_id}.{sample_id}.duplex_consensus.indel_realigned.bam",
+          index = "tmp/{batch_id}.{sample_id}.duplex_consensus.indel_realigned.bai"
+    params:
+          reference = HG19,
+          targets = get_files_from_config('targets_interval_list')
+    resources:
+             mem = 16,
+             runtime = 8
+    shell:
+         """
+         {GATK3} -T IndelRealigner \
+             -I {input} \
+             -o {output.bam} \
+             -R {params.reference} \
+             -allowPotentiallyMisencodedQuals \
+             -targetIntervals {params.targets} \
+             -model USE_READS \
+             -known {DBSNP} \
+             -known {KNOWN_INDELS} \
+             -known {VARIANT_GOLD_STANDARD}
+         """
+
+rule FilterDuplexConsensusReads:
+    input:
+         bam = "tmp/{batch_id}.{sample_id}.duplex_consensus.indel_realigned.bam",
+    output:
+          bam = CONSENSUS_OUT + "/{batch_id}.{sample_id}.duplex_consensus.filtered.bam",
+          index = CONSENSUS_OUT + "/{batch_id}.{sample_id}.duplex_consensus.filtered.bai"
+    params:
+          reference = HG19
+    shell:
+        """
+        {FGBIO} FilterConsensusReads \
+         -i {input.bam} \
+         -r {params.reference} \
+         -o {output.bam} \
+         -M 2 \
+         -N 20 \
+         -R \
+         --max-read-error-rate 0.01 \
+         --max-base-error-rate 0.05 \
+         --max-no-call-fraction 0.05 \
+         --min-mean-base-quality 40 \
+         --require-single-strand-agreement true
+        """
+
+rule CollectDuplexInsertSizeMetrics:
+    input:
+         bam = CONSENSUS_OUT + "/{batch_id}.{sample_id}.duplex_consensus.filtered.bam",
+         bait = get_files_from_config("targets_interval_list")
+    output:
+          txt = Metrics_OUT + "/{batch_id}.{sample_id}.duplex.insert_size_metrics.txt",
+          hist = Metrics_OUT + "/{batch_id}.{sample_id}.duplex.insert_size_histogram.pdf"
+    params:
+          ref = HG19
+    shell:
+         """
+         {PICARD} CollectInsertSizeMetrics I={input.bam} O={output.txt} H={output.hist} M=0.5 W=900 DEVIATIONS=100
+         """
+
+rule GetGermlineVcf:
+    input:
+         bam = CONSENSUS_OUT + "/{batch_id}.{sample_id}.duplex_consensus.filtered.bam",
+    output:
+          "vcf/{batch_id}.{sample_id}_germ.vcf.gz"
+    params:
+          reference = HG19,
+          targets = get_files_from_config('targets_interval_list')
+    wildcard_constraints:
+          sample_id = "[0-9a-zA-Z_]+"
+    shell:
+         """
+         {GATK3} -T HaplotypeCaller \
+                 -R {params.reference} \
+                 -I {input} \
+                 -allowPotentiallyMisencodedQuals \
+                 -G Standard \
+                 -L {params.targets} \
+                 -o {output} \
+                 -ip 200 
+         """
+
+rule CollectAllDuplexBamAndGermVcfs:
+    input:
+         expand(CONSENSUS_OUT + "/{batch_id}.{sample_id}.duplex_consensus.filtered.bam", batch_id = metadata.id.unique(), sample_id = metadata.index.unique()),
+         expand("vcf/{batch_id}.{sample_id}_germ.vcf.gz", batch_id = metadata.id.unique(), sample_id = metadata.index.unique())
+    wildcard_constraints:
+         batch_id="[0-9a-zA-Z_]+",
+         sample_id="[0-9a-zA-Z_]"
+    output:
+          "tmp/bookmark.txt"
+    shell:
+         """
+         echo "done DupSeq" > {output}
+         """
+
+rule Mutect:
+    input:
+         bam = CONSENSUS_OUT + "/{batch_id}.{sample_id}.duplex_consensus.filtered.bam",
+    params:
+         normal_bam = lambda wildcards, input: input[0].replace('ctDNA', 'gDNA'),
+         interval = get_files_from_config('targets_interval_list'),
+         tumor_name = "{batch_id}.{sample_id}.tumor",
+         normal_name = "{batch_id}.{sample_id}.normal",
+         ref = HG19,
+    output:
+         callstat = "mutect/{batch_id}.{sample_id}.duplex.call_stats.txt",
+         tdf = "mutect/{batch_id}.{sample_id}.duplex.tumordepth.txt",
+         ndf = "mutect/{batch_id}.{sample_id}.duplex.normaldepth.txt",
+    resources:
+         mem = 16,
+         runtime = 24,
+         ncores = config['ncores']
+    shell:
+        """
+        {MUTECT}  --analysis_type MuTect \
+            -I:tumor {input} \
+            -I:normal {params.normal_bam} \
+            -R {params.ref} \
+            -L {params.interval} \
+            -nt {resources.ncores} \
+            -filterNoBases \
+            -allowPotentiallyMisencodedQuals \
+            --tumor_sample_name {params.tumor_name} \
+            --normal_sample_name {params.normal_name} \
+            -dbsnp {DBSNP} \
+            --enable_extended_output \
+            -o {output.callstat} \
+            -tdf {output.tdf} \
+            -ndf {output.ndf}
+        """
+
+rule DetectFingerprintDSC:
+    input:
+         bam = CONSENSUS_OUT + "/{batch_id}.{sample_id}.duplex_consensus.filtered.bam",
+         bm = "tmp/bookmark.txt"
+    output:
+          detect = DETECT_DIR + "/{batch_id}.{sample_id}.dsc_detect_fingerprint.txt",
+          families = DETECT_DIR + "/{batch_id}.{sample_id}.dsc_detect_families.txt"
+    params:
+          ref = HG19,
+          mut_maf = lambda wildcards: metadata.loc[wildcards.sample_id]['maf_file'],
+          normal_bam = lambda wildcards, input: input[0].replace('ctDNA', 'gDNA'),
+    resources:
+          mem = 4,
+          runtime = 2
+    wildcard_constraints:
+          batch_id="[0-9a-zA-Z_]+",
+          sampld_id="[0-9a-zA-Z_]+ctDNA"
+    shell:
+         """
+         miredas DetectFingerprint \
+             -r {params.ref} \
+             -b {input.bam} \
+             -m {params.mut_maf} \
+             -o {output.detect} \
+             --mutant_families_outfile {output.families} \
+         """
+
+rule MiredasErrorMetrics2:
+    input:
+         bam = CONSENSUS_OUT + "/{batch_id}.{sample_id}.duplex_consensus.filtered.bam",
+         germ_vcf = "vcf/{batch_id}.{sample_id}_germ.vcf.gz",
+         bm = "tmp/bookmark.txt"
+    output:
+          "miredas/{batch_id}.{sample_id}.dupseq_consensus_error_metrics.txt",
+          "miredas/{batch_id}.{sample_id}.dupseq_consensus_mutant_families.txt",
+          "miredas/{batch_id}.{sample_id}.dupseq_consensus_trinucleotide_context.txt"
+    params:
+          normal_bam = lambda wildcards, input: input[0].replace('ctDNA', 'gDNA'),
+          germ_vcf = lambda wildcards, input: input[1].replace('ctDNA', 'gDNA'),
+          batch_id = "{batch_id}.{sample_id}",
+          output = "miredas/{batch_id}.{sample_id}.dupseq_consensus",
+          mut_maf = get_files_from_config('maf_file'),
+          interval_list = get_files_from_config('targets_interval_list'),
+          ref = HG19,
+          max_af = 1.0,
+    wildcard_constraints:
+          batch_id="[0-9a-zA-Z_]+",
+          sample_id="[0-9a-zA-Z_]+ctDNA"
+    resources:
+             mem = 8,
+             runtime = 96
+    shell:
+         """
+         miredas CollectErrorMetrics2 \
+             -b {input.bam} \
+             -n {params.normal_bam} \
+             -s {params.batch_id} \
+             -m {params.mut_maf} \
+             -i {params.interval_list} \
+             -r {params.ref} \
+             --output_mutant_families \
+             --het_vcf {params.germ_vcf} \
+             --max_af {params.max_af} \
+             --min_base_quality 89 \
+            -o {params.output} \
+         """
+
+rule GetContextErrorRate:
+    input:
+         mutfam = "miredas/{batch_id}.{sample_id}.dupseq_consensus_mutant_families.txt",
+         tnd = "miredas/{batch_id}.{sample_id}.dupseq_consensus_trinucleotide_context.txt"
+    output:
+         "miredas/{batch_id}.{sample_id}.dupseq_consensus_error_monomer.txt",
+    wildcard_constraints:
+                        batch_id="[0-9a-zA-Z_]+",
+                        index="[0-9a-zA-Z_]+ctDNA"
+    shell:
+         """
+           ../../../script/calculate_monomer_error_rate.py --tnd  {input.tnd} --mutfam {input.mutfam} > {output}
+         """
+
+rule NoEOF_MiredasErrorMetrics2:
+    input:
+         bam = CONSENSUS_OUT + "/{batch_id}.{sample_id}.duplex_consensus.filtered.bam",
+         germ_vcf = "vcf/{batch_id}.{sample_id}_germ.vcf.gz",
+         bm = "tmp/bookmark.txt"
+    output:
+          "miredas/noeof/{batch_id}.{sample_id}.dupseq_consensus_error_metrics.txt",
+          "miredas/noeof/{batch_id}.{sample_id}.dupseq_consensus_mutant_families.txt",
+          "miredas/noeof/{batch_id}.{sample_id}.dupseq_consensus_trinucleotide_context.txt"
+    params:
+          normal_bam = lambda wildcards, input: input[0].replace('ctDNA', 'gDNA'),
+          germ_vcf = lambda wildcards, input: input[1].replace('ctDNA', 'gDNA'),
+          batch_id = "{batch_id}.{sample_id}",
+          output = "miredas/noeof/{batch_id}.{sample_id}.dupseq_consensus",
+          ref = HG19,
+          mut_maf = get_files_from_config('maf_file'),
+          interval_list = get_files_from_config('targets_interval_list'),
+          max_af = 1.0,
+    wildcard_constraints:
+          batch_id="[0-9a-zA-Z_]+",
+          sample_id="[0-9a-zA-Z_]+ctDNA"
+    resources:
+             mem = 8,
+             runtime = 96
+    shell:
+         """
+         miredas CollectErrorMetrics2 \
+             -b {input.bam} \
+             -n {params.normal_bam} \
+             -s {params.batch_id} \
+             -m {params.mut_maf} \
+             -i {params.interval_list} \
+             -r {params.ref} \
+             --output_mutant_families \
+             --het_vcf {params.germ_vcf} \
+             --max_af {params.max_af} \
+             -df end_of_fragment \
+             --min_base_quality 89 \
+            -o {params.output} \
+         """
+
+rule NoEOF_GetContextErrorRate:
+    input:
+         mutfam = "miredas/noeof/{batch_id}.{sample_id}.dupseq_consensus_mutant_families.txt",
+         tnd = "miredas/noeof/{batch_id}.{sample_id}.dupseq_consensus_trinucleotide_context.txt"
+    output:
+         "miredas/noeof/{batch_id}.{sample_id}.dupseq_consensus_error_monomer.txt",
+    wildcard_constraints:
+                        batch_id="[0-9a-zA-Z_]+",
+                        sample_id="[0-9a-zA-Z_]+ctDNA"
+    shell:
+         """
+            ../../../script/calculate_monomer_error_rate.py --tnd  {input.tnd} --mutfam {input.mutfam} > {output}
+         """
+
+rule CollectRawHsMetrics:
+    input:
+         bam = get_files_from_config('input_bam'),
+         target = get_files_from_config('targets_interval_list'),
+         bait = get_files_from_config('baits_interval_list')
+    output:
+          metrics = Metrics_OUT + "/{batch_id}.{sample_id}.raw.hs_metrics.txt",
+          per_target_cov = Metrics_OUT  + "/{batch_id}.{sample_id}.raw.per_target_cov.txt"
+    resources:
+          mem = 64,
+          runtime = 12
+    params:
+          ref = HG19
+    shell:
+         """
+         {PICARD} CollectHsMetrics COVERAGE_CAP=20000 I={input.bam} O={output.metrics} R={params.ref} BAIT_INTERVALS={input.bait} TARGET_INTERVALS={input.target} PER_TARGET_COVERAGE={output.per_target_cov}
+         """
+
+rule CollectUmiMetricsByTarget:
+    input:
+         GROUP_BY_UMI_DIR + "/{batch_id}.{sample_id}.GroupedByUmi.bam",
+    output:
+         Metrics_OUT + "/bytarget/{batch_id}.{sample_id}.bytarget.duplex_yield_metrics.txt",
+    resources:
+         mem = 12,
+         runtime = 12
+    wildcard_constraints:
+         batch_id="[0-9a-zA-Z_]+",
+         sample_id="[0-9a-zA-Z_]+"
+    params:
+          interval = get_files_from_config('targets_interval_list')
+    shell:
+         """
+         {COLLECT_DUPMET} --bam_file {input} \
+             -l {params.interval} \
+             --min_reads 2 \
+             -p  \
+             -r \
+             -o {output}
+         """
+
+rule CollectUmiMetrics:
+    input:
+         GROUP_BY_UMI_DIR + "/{batch_id}.{sample_id}.GroupedByUmi.bam",
+    output:
+          duplex_family_sizes =  Metrics_OUT + "/{batch_id}.{sample_id}.duplex_family_sizes.txt",
+          duplex_yield_metrics =  Metrics_OUT + "/{batch_id}.{sample_id}.duplex_yield_metrics.txt",
+          family_sizes = Metrics_OUT + "/{batch_id}.{sample_id}.family_sizes.txt",
+          umi_counts = Metrics_OUT + "/{batch_id}.{sample_id}.umi_counts.txt"
+    wildcard_constraints:
+                        id="[0-9a-zA-Z_]+",
+                        index="[0-9a-zA-Z_]+"
+    resources:
+             mem = 12,
+             runtime = 12
+    params:
+          interval = get_files_from_config('targets_interval_list'),
+          out_prefix = Metrics_OUT + "/{batch_id}.{sample_id}"
+    shell:
+         """
+         {FGBIO} CollectDuplexSeqMetrics \
+             -i {input} \
+             -l {params.interval} \
+             -a 2 \
+             -b 2 \
+             -o {params.out_prefix}
+         """
+
+# rule ErrorRate:
+#     input:
+#          bam = "tmp/{sample_id}.{ctype}.bam",
+#     output:
+#           accu = ACCU_OUT + "/{sample_id}.{ctype}.error_metrics.txt",
+#           error = ACCU_OUT + "/{sample_id}.{ctype}.mutant_families.txt",
+#           known = ACCU_OUT + "/{sample_id}.{ctype}.known_var.txt",
+#           readlevel = ACCU_OUT + "/{sample_id}.{ctype}.readlevel.txt",
+#     params:
+#           germ_vcf =  "/xchip/bloodbiopsy/ruolin/link_duplex/cds_capture/cds_first_caputre/HD_82-cfDNA-MRD-HS_05246_315-FC16204779.bcf",
+#           vcf_sid = "HD_82-cfDNA-MRD-HS_05246_315-FC16204779",
+#           ref = HG19,
+#           mapq = 60,
+#           baseq = 0,
+#           high_conf_region = "/xchip/bloodbiopsy/ruolin/link_duplex/cds_capture/cds_first_caputre/BRCA-05246_CCPM_0300315_baits.bed",
+#           maf = get_files_from_config("maf_file")
+#     resources:
+#              mem = 8,
+#              runtime = 2,
+#     shell:
+#          """
+#             {ACCU_BIN}  -b {input.bam} \
+#                 -L {params.high_conf_region} \
+#                 -m {params.mapq} \
+#                 -r {params.ref} \
+#                 -V {params.germ_vcf} \
+#                 -s {params.vcf_sid} \
+#                 -p 0 \
+#                 -u \
+#                 -q {params.baseq} \
+#                 -a {output.accu} \
+#                 -e {output.error} \
+#                 --maf {params.maf} \
+#                 -k {output.known} \
+#                 --read_level_stat {output.readlevel}
+#          """

@@ -1,0 +1,644 @@
+include: "../Snakefile"
+GROUP_BY_UMI_DIR="gbu_bam_out"
+#MIREDAS_DIR="error"
+DETECT_DIR="detect"
+CONSENSUS_OUT="consensus_out"
+
+COLLECT_DUPMET = f"python {CODEC_root}/snakemake/script/collect_duplex_metrics.py"
+UMITOOLS = 'umi_tools'
+_, ctdna_names = list(zip(*metadata[metadata['dna_type'] == 'ctDNA'].index))
+
+rule all:
+    input:
+         expand("miredas/{index}.cds_consensus_error_monomer.txt",batch_id = batch_ids, index = ctdna_names),
+         expand(Metrics_OUT + "/byproduct/{batch_id}_split.{ss}.{index}.byproduct.txt", batch_id = batch_ids, ss = SPLITS, index = sample_names),
+         expand(Metrics_OUT + "/{batch_id}.{index}.raw.insert_size_metrics.txt", batch_id = batch_ids, index = sample_names),
+         expand(Metrics_OUT + "/{index}.raw.hs_metrics.txt",index = sample_names),
+         expand(Metrics_OUT + "/{index}.raw.markdup_metrics.txt",index = sample_names),
+         expand(Metrics_OUT + "/{index}.{type}.hs_metrics.txt",index = sample_names, type=['ssc', 'cds']),
+         expand(ACCU_OUT + "/cds_consensus/{index}.error_metrics.txt",index = sample_names),
+         expand(Metrics_OUT  + "/{index}.duplex_yield_metrics.txt", index = sample_names),
+         expand(Metrics_OUT + "/bytarget/{batch_id}.{index}.bytarget.duplex_yield_metrics.txt", batch_id=batch_ids, index = sample_names),
+         "tmp/bookmark.txt",
+
+rule MergeSamples:
+    input:
+         bam = expand("tmp/{batch_id}.{{index}}.raw.aligned.bam", batch_id = batch_ids)
+    output:
+         "raw/{index}.merged.bam"
+    resources:
+        mem = 8,
+        ncores = config['ncores'],
+        runtime = 16,
+    wildcard_constraints:
+        index="[0-9a-zA-Z_]+"
+    shell:
+         """
+         samtools merge -c -p -@ {resources.ncores} {output} {input}
+         """
+
+rule MarkDup:
+    input:
+         bam = "raw/{index}.merged.bam"
+    output:
+         bam = "raw/{index}.merged.markdup.bam",
+         metrics = "metrics/{index}.raw.markdup_metrics.txt",
+    resources:
+         mem = 48,
+         ncores = 1,
+         runtime = 32,
+    shell:
+         """
+         {PICARD} MarkDuplicates I={input} O={output.bam} M={output.metrics} CREATE_INDEX=true 
+         """
+sample_to_target = metadata.reset_index().groupby('sample').targets_interval_list.agg(set)
+sample_to_bait = metadata.reset_index().groupby('sample').baits_interval_list.agg(set)
+sample_to_bcf = metadata.reset_index().groupby('sample').bcf.agg(set)
+sample_to_maf = metadata.reset_index().groupby('sample').maf.agg(set)
+sample_to_bed = metadata.reset_index().groupby('sample').targets_bed.agg(set)
+
+rule CollectRawHsMetrics:
+    input:
+         bam = "raw/{index}.merged.markdup.bam",
+         target = lambda wildcards: sample_to_target[wildcards.index],
+         bait = lambda wildcards: sample_to_bait[wildcards.index],
+    output:
+          metrics = Metrics_OUT + "/{index}.raw.hs_metrics.txt",
+          per_target_cov = Metrics_OUT  + "/{index}.raw.per_target_cov.txt"
+    params:
+          ref = REF
+    resources:
+             mem = 64,
+             runtime = 12
+    shell:
+         """
+         {PICARD} CollectHsMetrics COVERAGE_CAP=20000 I={input.bam} O={output.metrics} R={params.ref} BAIT_INTERVALS={input.bait} TARGET_INTERVALS={input.target} PER_TARGET_COVERAGE={output.per_target_cov}
+         """
+
+rule GroupReadByUMI:
+    input:
+         umi_bam = "raw/{index}.merged.bam"
+    output:
+          bam = GROUP_BY_UMI_DIR + "/{index}.raw.GroupedByUmi.bam",
+          histogram = Metrics_OUT + "/{index}.raw.umiHistogram.txt"
+    resources:
+             mem = 16,
+             runtime = 32
+    shell:
+         """
+         {FGBIO} GroupReadsByUmi \
+             -i {input} \
+             -o {output.bam} \
+             -f {output.histogram} \
+             --allow-inter-contig=true \
+             --strategy=Paired \
+         """
+
+rule UmiTools:
+    input:
+         bam = "tmp/{batch_id}.{index}.raw.aligned.bam",
+    output:
+          bam = GROUP_BY_UMI_DIR + "/umitools/{batch_id}.{index}.GroupedByUmi.bam",
+          tsv = GROUP_BY_UMI_DIR + "/umitools/{batch_id}.{index}.tsv",
+          log = GROUP_BY_UMI_DIR + "/umitools/{batch_id}.{index}.log",
+    resources:
+             mem = 32,
+             runtime = 8
+    shell:
+         """
+         {UMITOOLS} group  \
+             -I {input.bam} \
+             --mapping-quality 60 \
+             --paired  \
+             -S {output.bam} \
+             --output-bam \
+             --group-out={output.tsv} \
+             --buffer-whole-contig \
+             --umi-tag=RX \
+             --umi-tag-delimiter=- \
+             --extract-umi-method=tag \
+             --temp-dir={tmpdir} \
+             --log={output.log}  && samtools index  {output.bam}
+         """
+
+rule CallMolecularConsensusReads:
+    input:
+         GROUP_BY_UMI_DIR + "/{index}.raw.GroupedByUmi.bam",
+    output:
+          temp("tmp/{index}.mol_consensus.bam")
+    params:
+          rg = "{index}"
+    resources:
+             mem = 12,
+             runtime = 12
+    shell:
+         """
+         {FGBIO} CallMolecularConsensusReads \
+             -i {input} \
+             -o {output} \
+             -p {params.rg} \
+             -M 1
+         """
+
+
+rule AlignMolecularConsensusReads:
+    input:
+         "tmp/{index}.mol_consensus.bam"
+    output:
+          fastq1 = temp("tmp/{index}_1.fq"),
+          fastq2 = temp("tmp/{index}_2.fq"),
+          tmp = temp("tmp/{index}.mol_consensus.aligned_tmp.bam"),
+          bam = temp("tmp/{index}.mol_consensus.bwa.bam"),
+          bai = temp("tmp/{index}.mol_consensus.bwa.bai")
+    params:
+          reference = REF,
+    resources:
+             mem = 32,
+             runtime = 16,
+             ncores = config['ncores']
+    shell:
+         """
+         {PICARD} SamToFastq \
+             I={input} \
+             FASTQ={output.fastq1} \
+             SECOND_END_FASTQ={output.fastq2} &&
+ 
+         {BWA} mem \
+             -K 100000000 \
+             -Y \
+             -t {resources.ncores} \
+             {params.reference} {output.fastq1} {output.fastq2} > {output.tmp} &&
+ 
+         {PICARD} MergeBamAlignment \
+             ALIGNED={output.tmp} \
+             UNMAPPED={input} \
+             O={output.bam} \
+             CREATE_INDEX=true \
+             MAX_RECORDS_IN_RAM=5000000 \
+             TMP_DIR={tmpdir} \
+             R={params.reference}
+         """
+
+rule IndelRealignment:
+    input:
+         bam = "tmp/{index}.mol_consensus.bwa.bam",
+         bai = "tmp/{index}.mol_consensus.bwa.bai"
+    output:
+          bam =  "ssc/{index}.mol_consensus.indel_realigned.bam",
+          index = "ssc/{index}.mol_consensus.indel_realigned.bai"
+    params:
+          reference = REF,
+          targets = lambda wildcards: sample_to_target[wildcards.index],
+    resources:
+             mem = 16,
+             runtime = 8
+    shell:
+         """
+         {GATK3} -T IndelRealigner \
+             -I {input.bam} \
+             -o {output.bam} \
+             -R {params.reference} \
+             -allowPotentiallyMisencodedQuals \
+             -targetIntervals {params.targets} \
+             -model USE_READS \
+         """
+
+rule GetGermlineVcf:
+    input:
+         "raw/{index}.merged.markdup.bam",
+    output:
+         "vcf/{index}_germ.vcf.gz"
+    params:
+        reference = REF,
+        targets = lambda wildcards: sample_to_target[wildcards.index],
+    # wildcard_constraints:
+    #     index = "[0-9a-zA-Z_]+gDNA"
+    shell:
+        """
+        {GATK3} -T HaplotypeCaller \
+                -R {params.reference} \
+                -I {input} \
+                -allowPotentiallyMisencodedQuals \
+                -G Standard \
+                -L {params.targets} \
+                -o {output} \
+                -ip 200 
+        """
+
+# rule ConvertToBCF:
+#     input:
+#         "vcf/{index}_germ.vcf.gz"
+#     output:
+#         "vcf/{index}_germ.bcf"
+#     shell:
+#         """
+#         bcftools view {input} -Ob -o  {output} && bcftools index {output}
+#         """
+
+## skip for WES because it remove a lot of reads
+rule FilterMolecularConsensusReads:
+    input:
+         bam = "tmp/{index}.mol_consensus.indel_realigned.bam",
+    output:
+         bam = "ssc/{index}.mol_consensus.aligned.bam",
+         bai = "ssc/{index}.mol_consensus.aligned.bai"
+    resources:
+             mem = 8,
+             runtime = 2
+    params:
+          ref = REF
+    shell:
+        """
+            {FGBIO} FilterConsensusReads \
+                  -i {input.bam} \
+                  -r {params.ref} \
+                  -o {output.bam} \
+                  -N 20 \
+                  --max-read-error-rate 0.01 \
+                  --max-base-error-rate 0.05 \
+                  --max-no-call-fraction 0.05 \
+                  -M 1 \
+                  --min-mean-base-quality 20 \
+                  -R \
+        """
+
+rule CollectSSCHsMetrics:
+    input:
+         bam =  "ssc/{index}.mol_consensus.indel_realigned.bam",
+         target = lambda wildcards: sample_to_target[wildcards.index],
+         bait = lambda wildcards: sample_to_bait[wildcards.index],
+    output:
+          metrics = Metrics_OUT + "/{index}.ssc.hs_metrics.txt",
+          per_target_cov = Metrics_OUT  + "/{index}.ssc.per_target_cov.txt"
+    params:
+          ref = REF
+    wildcard_constraints:
+          index="[0-9a-zA-Z_]+"
+    resources:
+             mem = 64,
+             runtime = 12
+    shell:
+         """
+         {PICARD} CollectHsMetrics COVERAGE_CAP=20000 I={input.bam} O={output.metrics} R={params.ref} BAIT_INTERVALS={input.bait} TARGET_INTERVALS={input.target} PER_TARGET_COVERAGE={output.per_target_cov}
+         """
+
+rule DuplexConsensus:
+    input:
+         bam = "ssc/{index}.mol_consensus.indel_realigned.bam",
+    output:
+         tmp =  temp("tmp/{index}.consensus.tmp.bam"),
+         bam = temp("tmp/{index}.cds_consensus.bam")
+    shell:
+         """
+         {CONSENSUS_BIN} -i -b {input} -o {output.tmp} -m 30 -t -q 30 -p 0 &&
+         {PICARD} SortSam I={output.tmp} O={output.bam} SO=queryname
+         """
+
+rule AlignConsensus:
+    input:
+         "tmp/{index}.cds_consensus.bam"
+    output:
+          fastq1 = temp("tmp/{index}.1.fq"),
+          fastq2 = temp("tmp/{index}.2.fq"),
+          tmp = temp("tmp/{index}.aligned_tmp.bam"),
+          bam = temp("tmp/{index}.cds_consensus.aligned.bam"),
+          bai = temp("tmp/{index}.cds_consensus.aligned.bai")
+    params:
+          reference = REF,
+    resources:
+             mem = 8,
+             ncores = config['ncores'],
+             runtime = 16
+    shell:
+         """
+         {PICARD} SamToFastq \
+             I={input} \
+             FASTQ={output.fastq1} \
+             SECOND_END_FASTQ={output.fastq2} &&
+         {BWA} mem \
+             -K 100000000 \
+             -Y \
+             -t {resources.ncores} \
+             {params.reference} {output.fastq1} {output.fastq2} > {output.tmp} &&
+         {PICARD} MergeBamAlignment \
+             ALIGNED={output.tmp} \
+             UNMAPPED={input} \
+             O={output.bam} \
+             R={params.reference} \
+             TMP_DIR={tmpdir} \
+             CREATE_INDEX=true \
+             MAX_RECORDS_IN_RAM=5000000
+         """
+
+rule CDSIndelRealignment:
+    input:
+         bam = "tmp/{index}.cds_consensus.aligned.bam",
+         bai = "tmp/{index}.cds_consensus.aligned.bai"
+    output:
+          bam =  temp("tmp/{index}.cds_consensus.indel_realigned.bam"),
+          index = temp("tmp/{index}.cds_consensus.indel_realigned.bai")
+    params:
+          reference = REF,
+          targets = lambda wildcards: sample_to_target[wildcards.index],
+    resources:
+             mem = 16,
+             runtime = 8
+    shell:
+         """
+         {GATK3} -T IndelRealigner \
+             -I {input.bam} \
+             -o {output.bam} \
+             -R {params.reference} \
+             -allowPotentiallyMisencodedQuals \
+             -targetIntervals {params.targets} \
+             -model USE_READS \
+         """
+
+rule CalculateMDtag:
+    input:
+         bam =  "tmp/{index}.cds_consensus.indel_realigned.bam",
+         index = "tmp/{index}.cds_consensus.indel_realigned.bai"
+    output:
+          bam =  "cds/{index}.cds_consensus.indel_realigned.addmd.bam",
+          index = "cds/{index}.cds_consensus.indel_realigned.addmd.bam.bai"
+    params:
+          ref = REF,
+    resources:
+          mem = 16,
+          runtime = 16,
+    shell:
+         """
+         samtools calmd -b {input.bam} {params.ref}  > {output.bam} && samtools index {output.bam}
+         """
+
+rule CollectAllCdsBam:
+    input:
+         expand("cds/{index}.cds_consensus.indel_realigned.addmd.bam.bai", batch_id = batch_ids, index = sample_names)
+    wildcard_constraints:
+         batch_id="[0-9a-zA-Z_]+",
+         index="[0-9a-zA-Z_]"
+    output:
+          "tmp/bookmark.txt"
+    shell:
+         """
+         echo "done CDS" > {output}
+         """
+
+rule CollectCDSHsMetrics:
+    input:
+         bam = "cds/{index}.cds_consensus.indel_realigned.addmd.bam",
+         target = lambda wildcards: sample_to_target[wildcards.index],
+         bait = lambda wildcards: sample_to_bait[wildcards.index],
+    output:
+          metrics = Metrics_OUT + "/{index}.cds.hs_metrics.txt",
+          per_target_cov = Metrics_OUT  + "/{index}.cds.per_target_cov.txt"
+    params:
+          ref = REF
+    resources:
+             mem = 64,
+             runtime = 12
+    shell:
+         """
+         {PICARD} CollectHsMetrics COVERAGE_CAP=20000 I={input.bam} O={output.metrics} R={params.ref} BAIT_INTERVALS={input.bait} TARGET_INTERVALS={input.target} PER_TARGET_COVERAGE={output.per_target_cov} MINIMUM_BASE_QUALITY=30 MINIMUM_MAPPING_QUALITY=60 
+         """
+
+# rule IlToBed:
+#     input:
+#          target = lambda wildcards: sample_to_target[wildcards.index],
+#     output:
+#           temp("tmp/{index}.target.bed")
+#     shell:
+#          """
+#          il_to_bed {input} | grep -v "^MT" > {output}
+#          """
+
+rule CDSErrorMetrics:
+    input:
+         bam = "cds/{index}.cds_consensus.indel_realigned.addmd.bam",
+    output:
+          accu = ACCU_OUT + "/cds_consensus/{index}.error_metrics.txt",
+          error = ACCU_OUT + "/cds_consensus/{index}.mutant_families.txt",
+          known = ACCU_OUT + "/cds_consensus/{index}.known_var.txt",
+    params:
+          germ_bcf = lambda wildcards: sample_to_bcf[wildcards.index],
+          mut_maf =  lambda wildcards: sample_to_maf[wildcards.index],
+          bed =  lambda wildcards: sample_to_bed[wildcards.index],
+          ref = REF,
+          mapq = 60,
+          baseq = 30,
+    resources:
+             mem = 8,
+             runtime = 96
+    shell:
+         """
+            {ACCU_BIN}  -b {input.bam} \
+                -L {params.bed} \
+                -m {params.mapq} \
+                -M {params.mut_maf} \
+                -r {params.ref} \
+                -V {params.germ_bcf} \
+                -p 0 \
+                -d 12 \
+                -x 2 \
+                -n 5 \
+                -q {params.baseq} \
+                -a {output.accu} \
+                -e {output.error} \
+                -k {output.known}
+         """
+
+rule RawErrorMetrics:
+    input:
+         bam = "tmp/{batch_id}.{index}.raw.aligned.bam",
+         bed = "tmp/{batch_id}.{index}.target.bed",
+    output:
+          accu = ACCU_OUT + "/raw/{batch_id}.{index}.error_metrics.txt",
+          error = ACCU_OUT + "/raw/{batch_id}.{index}.mutant_families.txt",
+          known = ACCU_OUT + "/raw/{batch_id}.{index}.known_var.txt",
+          read_level = ACCU_OUT + "/raw/{batch_id}.{index}.readlevel.txt",
+    params:
+          germ_bcf = lambda wildcards: metadata.loc[(wildcards.batch_id, wildcards.index)]['het_bcf'],
+          mut_maf = lambda wildcards: metadata.loc[(wildcards.batch_id, wildcards.index)]['maf'],
+          vcf_sid = "HD_82-cfDNA-MRD-HS_05246_315-FC16204779",
+          ref = REF,
+          mapq = 60,
+          baseq = 30,
+    resources:
+             mem = 8,
+             runtime = 96
+    shell:
+         """
+            {ACCU_BIN}  -b {input.bam} \
+                -L {input.bed} \
+                -m {params.mapq} \
+                -M {params.mut_maf} \
+                -r {params.ref} \
+                -V {params.germ_bcf} \
+                -s {params.vcf_sid} \
+                -p 1 \
+                -u \
+                -O \
+                -q {params.baseq} \
+                -a {output.accu} \
+                -e {output.error} \
+                --read_level_stat {output.read_level} \
+                -k {output.known}
+         """
+
+rule MiredasDetectFingerprint:
+    input:
+         bam =  "tmp/{batch_id}.{index}.{ctype}.indel_realigned.addmd.bam",
+         bm = "tmp/bookmark.txt"
+    output:
+         detect = DETECT_DIR + "/{batch_id}.{index}.{ctype}_detect_fingerprint.txt",
+         families = DETECT_DIR + "/{batch_id}.{index}.{ctype}_detect_families.txt"
+    params:
+         ref = REF,
+         ctype = "{ctype}",
+         mut_maf = lambda wildcards: metadata.loc[(wildcards.batch_id, wildcards.index)]['maf'],
+         normal_bam = lambda wildcards, input: input[0].replace('ctDNA', 'gDNA'),
+    resources:
+         mem = 4,
+         runtime = 2
+    wildcard_constraints:
+         batch_id="[0-9a-zA-Z_]+",
+         index="[0-9a-zA-Z_]+ctDNA"
+    shell:
+        """
+        miredas DetectFingerprint \
+            -r {params.ref} \
+            -n {params.normal_bam} \
+            -b {input.bam} \
+            -m {params.mut_maf} \
+            -o {output.detect} \
+            --min_base_quality 30 \
+            --mutant_families_outfile {output.families} \
+        """
+
+rule MiredasErrorMetrics2:
+    input:
+          bam =  "cds/{index}.cds_consensus.indel_realigned.addmd.bam",
+          bm = "tmp/bookmark.txt"
+    output:
+          "miredas/{index}.cds_consensus_error_metrics.txt",
+          "miredas/{index}.cds_consensus_mutant_families.txt",
+          "miredas/{index}.cds_consensus_trinucleotide_context.txt"
+    params:
+          normal_bam = lambda wildcards: metadata.reset_index(level='batch').loc[wildcards.index]['germ_bam'],
+          germ_vcf = lambda wildcards: metadata.reset_index(level='batch').loc[wildcards.index]['het_vcf'],
+          batch_id = "{index}",
+          output = "miredas/{index}.cds_consensus",
+          ref = REF,
+          mut_maf = lambda wildcards: metadata.reset_index(level = 'batch').loc[wildcards.index]['maf'],
+          interval_list = lambda wildcards: metadata.reset_index(level = 'batch').loc[wildcards.index]['targets_interval_list'],
+          max_af = 1.0,
+    wildcard_constraints:
+         batch_id="[0-9a-zA-Z_]+",
+         index="[0-9a-zA-Z_]+ctDNA"
+    resources:
+             mem = 8,
+             runtime = 96
+    shell:
+        """
+        miredas CollectErrorMetrics2 \
+            -b {input.bam} \
+            -n {params.normal_bam} \
+            -s {params.batch_id} \
+            -m {params.mut_maf} \
+            -i {params.interval_list} \
+            -r {params.ref} \
+            --output_mutant_families \
+            --het_vcf {params.germ_vcf} \
+            --max_af {params.max_af} \
+            --min_base_quality 30 \
+           -o {params.output} \
+        """
+
+rule GetContextErrorRate:
+    input:
+        mutfam = "miredas/{index}.cds_consensus_mutant_families.txt",
+        tnd = "miredas/{index}.cds_consensus_trinucleotide_context.txt"
+    output:
+        "miredas/{index}.cds_consensus_error_monomer.txt",
+    wildcard_constraints:
+        batch_id="[0-9a-zA-Z_]+",
+        index="[0-9a-zA-Z_]+ctDNA"
+    shell:
+         """
+           {MONOMER_ERROR_SCRIPT} --tnd  {input.tnd} --mutfam {input.mutfam} > {output}
+         """
+
+rule CollectRawInsertSizeMetrics:
+    input:
+         bam = "tmp/{batch_id}.{index}.raw.aligned.bam",
+    output:
+          txt = Metrics_OUT + "/{batch_id}.{index}.raw.insert_size_metrics.txt",
+          hist = Metrics_OUT + "/{batch_id}.{index}.raw.insert_size_histogram.pdf"
+    params:
+          ref = REF
+    shell:
+         """
+         {PICARD} CollectInsertSizeMetrics I={input.bam} O={output.txt} H={output.hist} M=0.5 W=900 DEVIATIONS=100
+         """
+
+rule CollectUmiMetricsByTarget:
+    input:
+         GROUP_BY_UMI_DIR + "/umitools/{id}.{index}.GroupedByUmi.bam",
+    output:
+          Metrics_OUT + "/bytarget/{id}.{index}.bytarget.duplex_yield_metrics.txt",
+    resources:
+             mem = 12,
+             runtime = 12
+    wildcard_constraints:
+          id="[0-9a-zA-Z_]+",
+          index="[0-9a-zA-Z_]+"
+    params:
+          interval = lambda wildcards: metadata.loc[(wildcards.id, wildcards.index)]['targets_interval_list'],
+    shell:
+         """
+         {COLLECT_DUPMET} --bam_file {input} \
+             -l {params.interval} \
+             --min_reads 1 \
+             -c \
+             -p \
+             -r \
+             -o {output}
+         """
+
+rule SortGBUbam:
+    input:
+        GROUP_BY_UMI_DIR + "/{index}.raw.GroupedByUmi.bam",
+    output:
+        bam = GROUP_BY_UMI_DIR + "/{index}.sorted.GroupedByUmi.bam",
+        bai = GROUP_BY_UMI_DIR + "/{index}.sorted.GroupedByUmi.bai",
+    resources:
+        mem = 12,
+        runtime = 12
+    shell:
+        """
+        {PICARD} SortSam I={input} O={output.bam} SO=coordinate CREATE_INDEX=true MAX_RECORDS_IN_RAM=1000000
+        """
+
+rule CollectUmiMetrics:
+    input:
+         GROUP_BY_UMI_DIR + "/{index}.sorted.GroupedByUmi.bam",
+    output:
+         Metrics_OUT + "/{index}.duplex_yield_metrics.txt",
+    resources:
+         mem = 32,
+         runtime = 12
+    wildcard_constraints:
+         index="[0-9a-zA-Z_]+"
+    params:
+         interval = lambda wildcards: sample_to_target[wildcards.index],
+    shell:
+         """
+         {COLLECT_DUPMET} --bam_file {input} \
+             -l {params.interval} \
+             --min_reads 1 \
+             -c \
+             -o {output}
+         """
+
+#rule CollectAllMetrics:
+#    input:

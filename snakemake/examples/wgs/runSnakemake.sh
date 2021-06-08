@@ -1,0 +1,1 @@
+root=$PWD/../../../codecsuite/snakemake && snakemake --cluster-sync $root/qsub_wrapper.py --jobscript $root/jobscript.sh --snakefile $root/AdapV2/wgs/Snakefile --configfile config.yaml --latency-wait 30 -j 2000 --restart-times 3 -p --rerun-incomplete --reason -n
