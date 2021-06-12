@@ -21,7 +21,7 @@ rule DuplexConsensus:
          runtime = 16
     shell:
          """
-         {CONSENSUS_BIN} -b {input} -o {output.tmp} -m 60 -t -q 30 -p 1 &&
+         {CONSENSUS_BIN} -b {input} -o {output.tmp} -m 0 -t -q 0 -p 1 &&
          {PICARD} SortSam I={output.tmp} O={output.bam} SO=queryname
          """
 
@@ -283,8 +283,7 @@ rule CollectWgsMetrics:
           itl = EVAL_REGION_IL
     shell:
          """
-         {PICARD} CollectWgsMetrics I={input.bam} O={output.metrics} R={params.ref} INTERVALS={params.itl} INCLUDE_BQ_HISTOGRAM=true \
-             MINIMUM_MAPPING_QUALITY=30 MINIMUM_BASE_QUALITY=30
+         {PICARD} CollectWgsMetrics I={input.bam} O={output.metrics} R={params.ref} INTERVALS={params.itl} INCLUDE_BQ_HISTOGRAM=true
          """
 
 # rule DeepTools:
