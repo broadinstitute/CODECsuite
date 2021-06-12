@@ -63,7 +63,7 @@ Usage: codec consensus [options]
 -b/--bam,                              Input bam [required]
 -o/--outbam,                           Output unmapped bamfile [required].
 -m/--mapq,                             Min mapping quality [10].
--q/--baseq,                            Min base quality for consensus. Otherwise, masked with N [20].
+-q/--baseq,                            paired baseq calibration. If only one of the baseq < cutoff, make the other one baseq = cutoff -1. [0].
 -l/--load_supplementary,               Include supplementary alignment [false].
 -t/--trim_overhang,                    When perform paired-end consensus, if true then only do consensus of the overlapped region [false].
 -C/--clip3,                            trim the 3'end soft clipping [false].
