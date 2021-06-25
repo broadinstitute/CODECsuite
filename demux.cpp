@@ -18,7 +18,7 @@ struct Options {
   string reference;
   int index_begin = 3;
   int index_len = 18;
-  int max_ed = 3;
+  int max_ed = 2;
   bool include_non_pf = false;
   bool verbose = false;
   bool count_PF = false;
@@ -52,7 +52,7 @@ void codec_demux_usage()
   std::cerr<< "-2/--q2,                               Input read2\n";
   std::cerr<< "-b/--index_begin,                      The read position where the index begins (Default: 3) \n";
   std::cerr<< "-l/--index_len,                        Index length (Default: 18)\n";
-  std::cerr<< "-e/--max_ed,                           Maximum edit distance allowed as a match (Default: 3)\n";
+  std::cerr<< "-e/--max_ed,                           Maximum edit distance allowed as a match (Default: 2)\n";
   std::cerr<< "-o/--outprefix,                        Output path, e.g., /tmp/test\n";
   std::cerr<< "-r/--ref,                              Reference genome fasta file, for judging index hopping\n";
   std::cerr<< "-i/--include_non_pf,                   Include non-pass filter reads\n";

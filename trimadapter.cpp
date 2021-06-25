@@ -229,10 +229,16 @@ int codec_trim(int argc, char** argv)
     }
     else {
       if (opt.linker_type == "adapter_v2")  {
-        assert(fts.first.tm == CDS::TRIM && fts.second.tm == CDS::TRIM);
-        HIGH_CONF++;
-        highconf.WriteRecord(read1, true);
-        highconf.WriteRecord(read2, false);
+        //assert(fts.first.tm == CDS::TRIM && fts.second.tm == CDS::TRIM);
+        if (fts.first.tm == CDS::TRIM && fts.second.tm == CDS::TRIM) {
+          HIGH_CONF++;
+          highconf.WriteRecord(read1, true);
+          highconf.WriteRecord(read2, false);
+        } else {
+          LOW_CONF++;
+          lowconf.WriteRecord(read1, true);
+          lowconf.WriteRecord(read1, false);
+        }
       }
       else {
         if (fts.second.tm == CDS::TRIM_INSUF &&

@@ -8,7 +8,8 @@ rule all:
          #expand(ACCU_OUT + "/{stype}/{batch_id}.{index}.error_metrics.txt", batch_id = batch_ids, index = sample_names, stype = ["consensus"]),
          #expand(Metrics_OUT + "/{group}_merged.cds_consensus.mol_consensus.{type}_metrics.txt", group = batch_ids, type=['wgs']),
          #expand("consensus/{index}.merged.cds_consensus.aligned.bam", index = sample_names),
-         expand(Metrics_OUT + "/{index}.merged.cds_consensus.wgs_metrics.txt",index = sample_names)
+         #expand(Metrics_OUT + "/{index}.merged.cds_consensus.wgs_metrics.txt",index = sample_names),
+         expand("consensus/{index}.merged.cds_consensus.replacerg.markdup.bam", index =sample_names)
 
 rule DuplexConsensus:
     input:
@@ -32,8 +33,8 @@ rule AlignConsensus:
           fastq1 = temp("tmp/{sample_id}.{index}.1.fq"),
           fastq2 = temp("tmp/{sample_id}.{index}.2.fq"),
           tmp = temp("tmp/{sample_id}.{index}.aligned_tmp.bam"),
-          bam = "consensus/{sample_id}.{index}.consensus.aligned.bam",
-          bai = "consensus/{sample_id}.{index}.consensus.aligned.bai"
+          bam = temp("consensus/{sample_id}.{index}.consensus.aligned.bam"),
+          bai = temp("consensus/{sample_id}.{index}.consensus.aligned.bai")
     params:
           reference = REF,
     resources:
@@ -143,7 +144,7 @@ rule MergeGroup:
              runtime = 16,
     shell:
          """
-         samtools merge -@ {resources.ncores} {output.bam} {input} && samtools index {output.bam} -@ {resources.ncores}
+         samtools merge -@ {resources.ncores} {output.bam} {input}
          """
 
 # rule MergeAll:
@@ -164,7 +165,8 @@ rule ReplaceReadGroup:
     input:
        "consensus/{index}.merged.cds_consensus.aligned.bam"
     output:
-       "consensus/{index}.merged.cds_consensus.replacerg.bam"
+       bam = temp("consensus/{index}.merged.cds_consensus.replacerg.bam"),
+       bai = temp("consensus/{index}.merged.cds_consensus.replacerg.bai"),
     params:
         sid = "{index}"
     resources:
@@ -174,7 +176,7 @@ rule ReplaceReadGroup:
         """
         {PICARD} AddOrReplaceReadGroups \
            I={input} \
-           O={output} \
+           O={output.bam} \
            CREATE_INDEX=true \
            RGID=4 \
            RGLB=lib1 \
@@ -194,7 +196,8 @@ rule MarkDuplicates:
         met = "metrics/{index}.marked_duplicates.txt"
     shell:
         """
-        {PICARD} MarkDuplicates I={input.bam} O={output.bam} M={output.met} CREATE_INDEX=true
+        {PICARD} MarkDuplicates I={input.bam} O={output.bam} M={output.met} CREATE_INDEX=true \
+            TAG_DUPLICATE_SET_MEMBERS=true TAGGING_POLICY=All PG=null BARCODE_TAG=RX
         """
 
 # rule GroupReadByUMI:

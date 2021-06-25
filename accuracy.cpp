@@ -110,7 +110,7 @@ void accuracy_print_help()
   std::cerr<< "-L/--bed,                              targeted region\n";
   std::cerr<< "-m/--mapq,                             min mapping quality [10].\n";
   std::cerr<< "-S/--load_supplementary,               include supplementary alignment [false].\n";
-  std::cerr<< "-S/--load_secondary,                   include secondary alignment [false].\n";
+  std::cerr<< "-2/--load_secondary,                   include secondary alignment [false].\n";
   std::cerr<< "-u/--load_unpair,                      include unpaired alignment [false].\n";
   std::cerr<< "-V/--vcfs,                             comma separated VCF file(s) for germline variants or whitelist variants[null].\n";
   std::cerr<< "-M/--maf,                              MAF file for somatic variants [null].\n";
