@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.18)
 set( CMAKE_CXX_STANDARD 14 )
 project (AdapterTrim LANGUAGES CXX)
-#set(CMAKE_BUILD_TYPE Release)
-set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_BUILD_TYPE Release)
+#set(CMAKE_BUILD_TYPE Debug)
 #for gprof
 #set (CMAKE_CXX_FLAGS "${CAMKE_CXX_FLAGS} -g -pg -O0")
 #for valgrind

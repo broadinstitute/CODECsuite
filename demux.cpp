@@ -10,7 +10,7 @@
 #include "Files.h"
 
 using std::string;
-struct Options {
+struct DemuxOptions {
   string library_file;
   string fastq1;
   string fastq2;
@@ -25,7 +25,7 @@ struct Options {
 };
 
 
-static struct option  long_options[] = {
+static struct option  demux_long_options[] = {
     {"library_param",            required_argument,      0,        'p'},
     {"q1",                       required_argument,      0,        '1'},
     {"q2",                       required_argument,      0,        '2'},
@@ -60,11 +60,11 @@ void codec_demux_usage()
   std::cerr<< "-c/--count_pf,                         Just count number of pass filter pairs. Do not do anything else\n";
 }
 
-int demux_parse_options(int argc, char* argv[], Options& opt) {
+int demux_parse_options(int argc, char* argv[], DemuxOptions& opt) {
   int option_index;
   int next_option = 0;
   do {
-    next_option = getopt_long(argc, argv, demux_short_options, long_options, &option_index);
+    next_option = getopt_long(argc, argv, demux_short_options, demux_long_options, &option_index);
     switch (next_option) {
       case -1:break;
       case 'p':
@@ -109,7 +109,7 @@ int demux_parse_options(int argc, char* argv[], Options& opt) {
 }
 
 int codec_demux(int argc, char ** argv) {
-  Options opt;
+  DemuxOptions opt;
   int parse_ret = demux_parse_options(argc, argv, opt);
   if (parse_ret) return 1;
   if (argc == 1) {

@@ -38,7 +38,7 @@
 
 
 using std::string;
-struct Options {
+struct CssOptions {
   string bam;
   int mapq = 10;
   bool load_supplementary = false;
@@ -56,7 +56,7 @@ struct Options {
 };
 
 
-static struct option  long_options[] = {
+static struct option  consensus_long_options[] = {
     {"bam",                      required_argument,      0,        'b'},
     {"load_supplementary",       no_argument,            0,        'l'},
     {"clip3",                    no_argument,            0,        'C'},
@@ -97,11 +97,11 @@ void consensus_print_help()
   //std::cerr<< "-M/--consensus_mode,                   0 for paired end consensus. [0]\n";
 }
 
-int consensus_parse_options(int argc, char* argv[], Options& opt) {
+int consensus_parse_options(int argc, char* argv[], CssOptions& opt) {
   int option_index;
   int next_option = 0;
   do {
-    next_option = getopt_long(argc, argv, consensus_short_options, long_options, &option_index);
+    next_option = getopt_long(argc, argv, consensus_short_options, consensus_long_options, &option_index);
     switch (next_option) {
       case -1:break;
       case 'b':
@@ -153,7 +153,7 @@ int consensus_parse_options(int argc, char* argv[], Options& opt) {
 
 
 int codec_consensus(int argc, char ** argv) {
-  Options opt;
+  CssOptions opt;
   int parse_ret =  consensus_parse_options(argc, argv, opt);
   if (parse_ret) return 1;
   if (argc == 1) {
@@ -190,7 +190,7 @@ int codec_consensus(int argc, char ** argv) {
   std::system(samsort.c_str());
   std::cout << "sorting done" << std::endl;
 
-  cpputil::InsertSeqFactory isf(temp, opt.mapq, opt.load_supplementary, opt.load_secondary, opt.clip3);
+  cpputil::InsertSeqFactory isf(temp, opt.mapq, opt.load_supplementary, opt.load_secondary, true, opt.clip3);
   cpputil::UnMappedBamWriter writer(opt.outbam, isf.bamheader());
   int64_t read_counter = 0;
   if (opt.consensus_mode == 0) {

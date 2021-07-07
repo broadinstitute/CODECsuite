@@ -41,7 +41,7 @@ using std::string;
 using std::vector;
 int MYINT_MAX = std::numeric_limits<int>::max();
 
-struct Options {
+struct AccuOptions {
   string bam;
   string accuracy_stat = "accuracy_stat.txt";
   string error_prof_out = "error_prof_out.txt";
@@ -50,6 +50,7 @@ struct Options {
   bool load_supplementary = false;
   bool load_secondary = false;
   bool load_unpair = false;
+  bool load_duplicate = false;
   int max_nm_filter = MYINT_MAX;
   int max_mismatch_filter = MYINT_MAX;
   int verbose = 0;
@@ -70,13 +71,14 @@ struct Options {
 };
 
 
-static struct option  long_options[] = {
+static struct option  accuracy_long_options[] = {
     {"bam",                      required_argument,      0,        'b'},
     {"bed",                      required_argument,      0,        'L'},
     {"accuracy_stat",            required_argument,      0,        'a'},
     {"load_unpair",              no_argument,            0,        'u'},
     {"load_supplementary",       no_argument,            0,        'S'},
     {"load_secondary",           no_argument,            0,        '2'},
+    {"load_duplicate",           no_argument,            0,        'D'},
     {"mapq",                     required_argument ,     0,        'm'},
     {"vcfs",                     required_argument ,     0,        'V'},
     {"maf",                      required_argument ,     0,        'M'},
@@ -98,7 +100,7 @@ static struct option  long_options[] = {
     {0,0,0,0}
 };
 
-const char* accuracy_short_options = "b:a:m:v:S2us:r:e:q:k:OM:p:d:n:x:V:L:";
+const char* accuracy_short_options = "b:a:m:v:S2us:r:e:q:k:OM:p:d:n:x:V:L:D";
 
 void accuracy_print_help()
 {
@@ -112,6 +114,7 @@ void accuracy_print_help()
   std::cerr<< "-S/--load_supplementary,               include supplementary alignment [false].\n";
   std::cerr<< "-2/--load_secondary,                   include secondary alignment [false].\n";
   std::cerr<< "-u/--load_unpair,                      include unpaired alignment [false].\n";
+  std::cerr<< "-D/--load_duplicate,                   include alignment marked as duplicates [false].\n";
   std::cerr<< "-V/--vcfs,                             comma separated VCF file(s) for germline variants or whitelist variants[null].\n";
   std::cerr<< "-M/--maf,                              MAF file for somatic variants [null].\n";
   std::cerr<< "-s/--sample,                           sample from the VCF file [null].\n";
@@ -132,11 +135,11 @@ void accuracy_print_help()
   std::cerr<< "-O/--overlap_only,                     Count only overlapped region of a read pair. Default [false].\n";
 }
 
-int accuracy_parse_options(int argc, char* argv[], Options& opt) {
+int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
   int option_index;
   int next_option = 0;
   do {
-    next_option = getopt_long(argc, argv, accuracy_short_options, long_options, &option_index);
+    next_option = getopt_long(argc, argv, accuracy_short_options, accuracy_long_options, &option_index);
     switch (next_option) {
       case -1:break;
       case 'v':
@@ -175,6 +178,8 @@ int accuracy_parse_options(int argc, char* argv[], Options& opt) {
       case 'u':
         opt.load_unpair = true;
         break;
+      case 'D':
+        opt.load_duplicate = true;
       case 'O':
         opt.overlap_only = true;
         break;
@@ -366,7 +371,7 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
                     const SeqLib::BamHeader& bamheader,
                     const SeqLib::RefGenome& ref,
                     const SeqLib::GenomicRegion* const gr,
-                    const Options& opt,
+                    const AccuOptions& opt,
                     const cpputil::BCFReader& bcf_reader,
                     const cpputil::BCFReader& bcf_reader2,
                     const cpputil::MAFReader& mafr,
@@ -513,7 +518,7 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
 }
 
 int codec_accuracy(int argc, char ** argv) {
-  Options opt;
+  AccuOptions opt;
   int parse_ret =  accuracy_parse_options(argc, argv, opt);
   if (parse_ret) return 1;
   if (argc == 1) {
@@ -555,7 +560,7 @@ int codec_accuracy(int argc, char ** argv) {
         "read_name\tR1_q0_nerror\tR1_q0_efflen\tR1_q30_nerror\tR1_q30_efflen\tR2_q0_nerror\tR2_q0_efflen\tR2_q30_nerror\tR2_q30_efflen\tfraglen";
     readlevel << read_level_header << std::endl;
   }
-  cpputil::InsertSeqFactory isf(opt.bam, opt.mapq, opt.load_supplementary, opt.load_secondary, false);
+  cpputil::InsertSeqFactory isf(opt.bam, opt.mapq, opt.load_supplementary, opt.load_secondary, opt.load_duplicate, false);
 //  SeqLib::BamWriter trim_bam_writer;
 //  if (!opt.trim_bam.empty()) {
 //    trim_bam_writer.SetHeader(isf.bamheader());
@@ -582,7 +587,7 @@ int codec_accuracy(int argc, char ** argv) {
       auto timenow = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
       std::cerr << i + 1 << " region processed. Last position: " << gr << std::ctime(&timenow) << std::endl;
     }
-    if (isf.ReadByRegion(cpputil::ArePEAlignmentOverlapAtLeastK, gr, chunk, opt.pair_min_overlap, opt.load_unpair)) {
+    if (isf.ReadByRegion(cpputil::ArePEAlignmentOverlapAtLeastK, gr, chunk, opt.pair_min_overlap, "", opt.load_unpair)) {
       for (auto frag : chunk) {
         ErrorRateDriver(frag, isf.bamheader(), ref, &gr, opt,
                         bcf_reader, bcf_reader2,

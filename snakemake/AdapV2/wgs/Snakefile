@@ -8,8 +8,13 @@ rule all:
          #expand(ACCU_OUT + "/{stype}/{batch_id}.{index}.error_metrics.txt", batch_id = batch_ids, index = sample_names, stype = ["consensus"]),
          #expand(Metrics_OUT + "/{group}_merged.cds_consensus.mol_consensus.{type}_metrics.txt", group = batch_ids, type=['wgs']),
          #expand("consensus/{index}.merged.cds_consensus.aligned.bam", index = sample_names),
+<<<<<<< Updated upstream
          #expand(Metrics_OUT + "/{index}.merged.cds_consensus.wgs_metrics.txt",index = sample_names),
          expand("consensus/{index}.merged.cds_consensus.replacerg.markdup.bam", index =sample_names)
+=======
+         #expand(Metrics_OUT + "/{index}.merged.cds_consensus.wgs_metrics.txt",index = sample_names)
+         expand("groupbyumi/{index}.merged.cds_consensus.GroupedByUmi.bam",index = sample_names)
+>>>>>>> Stashed changes
 
 rule DuplexConsensus:
     input:
@@ -200,23 +205,23 @@ rule MarkDuplicates:
             TAG_DUPLICATE_SET_MEMBERS=true TAGGING_POLICY=All PG=null BARCODE_TAG=RX
         """
 
-# rule GroupReadByUMI:
-#     input:
-#          "consensus/{index}.merged.cds_consensus.replacerg.bam"
-#     output:
-#           bam = "groupbyumi/{index}.merged.cds_consensus.GroupedByUmi.bam",
-#           histogram = Metrics_OUT + "/{index}.merged.cds_consensus.umiHistogram.txt"
-#     resources:
-#              mem = 16,
-#              runtime = 32
-#     shell:
-#          """
-#          {FGBIO} GroupReadsByUmi \
-#              -i {input} \
-#              -o {output.bam} \
-#              -f {output.histogram} \
-#              --strategy=Paired \
-#          """
+rule GroupReadByUMI:
+    input:
+         "consensus/{index}.merged.cds_consensus.replacerg.markdup.bam",
+    output:
+         bam = "groupbyumi/{index}.merged.cds_consensus.GroupedByUmi.bam",
+         histogram = Metrics_OUT + "/{index}.merged.cds_consensus.umiHistogram.txt"
+    resources:
+             mem = 16,
+             runtime = 32
+    shell:
+         """
+         {FGBIO} GroupReadsByUmi \
+             -i {input} \
+             -o {output.bam} \
+             -f {output.histogram} \
+             --strategy=Paired \
+         """
 
 # rule CallMolecularConsensusReads:
 #     input:
