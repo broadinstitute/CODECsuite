@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.18)
 set( CMAKE_CXX_STANDARD 14 )
-project (AdapterTrim LANGUAGES CXX)
+project (codecsuite LANGUAGES CXX)
 set(CMAKE_BUILD_TYPE Release)
 #set(CMAKE_BUILD_TYPE Debug)
 #for gprof
