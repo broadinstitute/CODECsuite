@@ -6,7 +6,7 @@ set(CMAKE_BUILD_TYPE Release)
 #for gprof
 #set (CMAKE_CXX_FLAGS "${CAMKE_CXX_FLAGS} -g -pg -O0")
 #for valgrind
-set (CMAKE_CXX_FLAGS "${CAMKE_CXX_FLAGS} -g -O1")
+#set (CMAKE_CXX_FLAGS "${CAMKE_CXX_FLAGS} -g -O1")
 set( CMAKE_EXE_LINKER_FLAGS " ${CMAKE_EXE_LINKER_FLAGS} -pthread")
 set( CMAKE_CXX_FLAGS " ${CMAKE_CXX_FLAGS} -Wall -Wno-deprecated -Wno-unused-variable " )
 
