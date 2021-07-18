@@ -30,7 +30,7 @@ BWA = "bwa"
 PICARD = f"java {JAVA_PARAMS} -jar $PICARD"
 GATK = f"{config['gatk4']} --java-options \"{JAVA_PARAMS}\""
 GATK3 = f"{config['gatk3']} --java-options \"{JAVA_PARAMS}\""
-FGBIO = f"java {JAVA_PARAMS} -jar $FGBIO"
+FGBIO = f"java {JAVA_PARAMS} -jar {config['fgbio']}"
 
 DETECT_DIR="detect"
 ACCU_OUT="accu_out"

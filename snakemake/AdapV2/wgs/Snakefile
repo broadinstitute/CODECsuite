@@ -9,7 +9,7 @@ rule all:
          #expand(Metrics_OUT + "/{group}_merged.cds_consensus.mol_consensus.{type}_metrics.txt", group = batch_ids, type=['wgs']),
          #expand("consensus/{index}.merged.cds_consensus.aligned.bam", index = sample_names),
          #expand(Metrics_OUT + "/{index}.merged.cds_consensus.wgs_metrics.txt",index = sample_names)
-         expand("groupbyumi/{index}.merged.cds_consensus.GroupedByUmi.bam",index = sample_names)
+         expand("consensus/{index}.merged.cds_consensus.mol_consensus.aligned.bam",index = sample_names)
 
 rule DuplexConsensus:
     input:
@@ -202,7 +202,7 @@ rule MarkDuplicates:
 
 rule GroupReadByUMI:
     input:
-         "consensus/{index}.merged.cds_consensus.replacerg.markdup.bam",
+         "consensus/{index}.merged.cds_consensus.replacerg.bam",
     output:
          bam = "groupbyumi/{index}.merged.cds_consensus.GroupedByUmi.bam",
          histogram = Metrics_OUT + "/{index}.merged.cds_consensus.umiHistogram.txt"
@@ -218,63 +218,63 @@ rule GroupReadByUMI:
              --strategy=Paired \
          """
 
-# rule CallMolecularConsensusReads:
-#     input:
-#          "groupbyumi/{merged_id}.merged.cds_consensus.GroupedByUmi.bam",
-#     output:
-#          "tmp/{merged_id}.merged.cds_consensus.mol_consensus.bam"
-#     params:
-#           rg = "{merged_id}"
-#     resources:
-#              mem = 12,
-#              runtime = 36
-#     shell:
-#          """
-#
-#          {FGBIO} CallMolecularConsensusReads \
-#              -i {input} \
-#              -o {output} \
-#              -p {params.rg} \
-#              -M 1
-#          """
-#
-# rule AlignMolecularConsensusReads:
-#     input:
-#          "tmp/{merged_id}.merged.cds_consensus.mol_consensus.bam"
-#     output:
-#           fastq1 = temp("tmp/{merged_id}_1.fq"),
-#           fastq2 = temp("tmp/{merged_id}_2.fq"),
-#           tmp = temp("tmp/{merged_id}.mol_consensus.aligned_tmp.bam"),
-#           bam = "consensus/{merged_id}.merged.cds_consensus.mol_consensus.aligned.bam",
-#           bai = "consensus/{merged_id}.merged.cds_consensus.mol_consensus.aligned.bai"
-#     params:
-#           reference = REF,
-#     resources:
-#              mem = 12,
-#              runtime = 32,
-#              ncores = config['ncores']
-#     shell:
-#          """
-#          {PICARD} SamToFastq \
-#              I={input} \
-#              FASTQ={output.fastq1} \
-#              SECOND_END_FASTQ={output.fastq2} &&
-#
-#          {BWA} mem \
-#              -K 100000000 \
-#              -t {resources.ncores} \
-#              -Y \
-#              {params.reference} {output.fastq1} {output.fastq2} > {output.tmp} &&
-#
-#          {PICARD} MergeBamAlignment \
-#              ALIGNED={output.tmp} \
-#              UNMAPPED={input} \
-#              O={output.bam} \
-#              CREATE_INDEX=true \
-#              MAX_RECORDS_IN_RAM=5000000 \
-#              TMP_DIR={tmpdir} \
-#              R={params.reference}
-#          """
+rule CallMolecularConsensusReads:
+    input:
+         "groupbyumi/{index}.merged.cds_consensus.GroupedByUmi.bam",
+    output:
+         temp("tmp/{index}.merged.cds_consensus.mol_consensus.bam")
+    params:
+          rg = "{index}"
+    resources:
+             mem = 12,
+             runtime = 36
+    shell:
+         """
+
+         {FGBIO} CallMolecularConsensusReads \
+             -i {input} \
+             -o {output} \
+             -p {params.rg} \
+             -M 1
+         """
+
+rule AlignMolecularConsensusReads:
+    input:
+         "tmp/{index}.merged.cds_consensus.mol_consensus.bam"
+    output:
+          fastq1 = temp("tmp/{index}_1.fq"),
+          fastq2 = temp("tmp/{index}_2.fq"),
+          tmp = temp("tmp/{index}.mol_consensus.aligned_tmp.bam"),
+          bam = "consensus/{index}.merged.cds_consensus.mol_consensus.aligned.bam",
+          bai = "consensus/{index}.merged.cds_consensus.mol_consensus.aligned.bai"
+    params:
+          reference = REF,
+    resources:
+             mem = 12,
+             runtime = 32,
+             ncores = config['ncores']
+    shell:
+         """
+         {PICARD} SamToFastq \
+             I={input} \
+             FASTQ={output.fastq1} \
+             SECOND_END_FASTQ={output.fastq2} &&
+
+         {BWA} mem \
+             -K 100000000 \
+             -t {resources.ncores} \
+             -Y \
+             {params.reference} {output.fastq1} {output.fastq2} > {output.tmp} &&
+
+         {PICARD} MergeBamAlignment \
+             ALIGNED={output.tmp} \
+             UNMAPPED={input} \
+             O={output.bam} \
+             CREATE_INDEX=true \
+             MAX_RECORDS_IN_RAM=5000000 \
+             TMP_DIR={tmpdir} \
+             R={params.reference}
+         """
 
 rule CollectWgsMetrics:
     input:
