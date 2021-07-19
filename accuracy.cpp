@@ -126,7 +126,7 @@ void accuracy_print_help()
   std::cerr<< "--detail_qscore_prof,                  Output finer scale qscore cutoffs, error rates profile. The default is only q0, q30 [false]. \n";
   std::cerr<< "--read_level_stat,                     Output read level stat.\n";
   std::cerr<< "\nFiltering Options:\n";
-  std::cerr<< "-q/--bqual_min,                        Skip bases with baseQ smaller than this when calculating error rate [0].\n";
+  std::cerr<< "-q/--bqual_min,                        Skip bases if min(q1, q2) < this when calculating error rate. q1, q2 are baseQ from R1 and R2 respectively [0].\n";
   std::cerr<< "-n/--max_edit_filter,                  Skip a read if its NM tag is larger than this value [INT_MAX].\n";
   std::cerr<< "-x/--max_nonNedit_filter,              Skip a read if the number of non-N bases edits is larger than this value [INT_MAX].\n";
   std::cerr<< "-d/--fragend_dist_filter,              Consider a variant if its distance to the fragment end is at least this value [0].\n";
@@ -464,27 +464,37 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
     }
     // second pass classifies the variants
     for (const auto& duo: var_vars) {
+      // filter cases when R1 and R2 disagree
+      bool pass = true;
+      if (duo.second.size() < 2) {
+        if (duo.second[0].Type() == "SNV" and duo.second[0].var_qual >= opt.bqual_min) --errorstat.neval;
+        pass = false;
+      }
+      if (duo.second.size() == 2 and duo.second[0].Type() == "SNV" and duo.second[1].Type() == "SNV" and
+          ((duo.second[0].var_qual < opt.bqual_min and duo.second[1].var_qual >= opt.bqual_min)
+          or (duo.second[0].var_qual >= opt.bqual_min and duo.second[1].var_qual < opt.bqual_min))) {
+        --errorstat.neval;
+        pass = false;
+      }
+
       for (const auto& var : duo.second) {
-        if (bcf_reader.IsOpen()
+        if (pass && bcf_reader.IsOpen()
             && bcf_reader.var_exist(var.contig, var.contig_start, var.alt_seq.c_str())) { // known var
           known << var << '\t' << "PRI_VCF" << '\n';
         }
-        else if (bcf_reader2.IsOpen()
+        else if (pass && bcf_reader2.IsOpen()
             && bcf_reader2.var_exist(var.contig, var.contig_start, var.alt_seq.c_str())) { // second known var
           known << var << '\t' << "SEC_VCF" << '\n';
           if (var.Type() == "SNV") {
             errorstat.nerror_masked_by_vcf2 += 1;
           }
         }
-        else if (mafr.IsOpen()
+        else if (pass && mafr.IsOpen()
             && mafr.VarExist(var.contig, var.contig_start + 1, var.alt_seq)) { //known maf site
           known << var << '\t' << "MAF" << '\n';
         }
         else { // error site
-          if (var.Type() == "SNV" && var.var_qual >= opt.bqual_min) {
-            num += 1;
-            ferr << var << '\t' << (duo.second.size() == 2 ? 1 : 0) << '\n'; // concordant or not
-          }
+          // other error profiles
           if (var.Type() == "SNV") {
             for (int qcut : errorstat.cutoffs) {
               if (var.var_qual >= qcut) {
@@ -493,14 +503,24 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
                 if (qcut == 30) {var.first_of_pair ? ++r1_q30_nerror : ++r2_q30_nerror;}
               }
             }
+            //pos profile
             int tpos = var.alt_start < 0 ?  abs(var.alt_start + 1): var.alt_start;
             var.first_of_pair ? errorstat.R1_q0_error[tpos] += 1 : errorstat.R2_q0_error[tpos] += 1;
             if (var.var_qual >= 30) {
               var.first_of_pair ? errorstat.R1_q30_error[tpos] += 1: errorstat.R2_q30_error[tpos] += 1;
             }
+          } //end other profiles
+
+          if (not pass) continue;
+          if (var.Type() == "SNV") {
+            if (var.var_qual >= opt.bqual_min) {
+              num += 1;
+              ferr << var << '\t' << (duo.second.size() == 2 ? 1 : 0) << '\n'; // concordant or not
+            }
           } else { // indel
             ferr << var << '\t' << (duo.second.size() == 2 ? 1 : 0) << '\n'; // concordant or not
           }
+
         }
       }
     }
