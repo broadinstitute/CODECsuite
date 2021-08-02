@@ -8,8 +8,8 @@ rule all:
          #expand(ACCU_OUT + "/{stype}/{batch_id}.{index}.error_metrics.txt", batch_id = batch_ids, index = sample_names, stype = ["consensus"]),
          #expand(Metrics_OUT + "/{group}_merged.cds_consensus.mol_consensus.{type}_metrics.txt", group = batch_ids, type=['wgs']),
          #expand("consensus/{index}.merged.cds_consensus.aligned.bam", index = sample_names),
-         #expand(Metrics_OUT + "/{index}.merged.cds_consensus.wgs_metrics.txt",index = sample_names)
-         expand("consensus/{index}.merged.cds_consensus.mol_consensus.aligned.bam",index = sample_names)
+         expand(Metrics_OUT + "/{index}.merged.cds_consensus.wgs_metrics.txt",index = sample_names),
+         expand("groupbyumi/{index}.merged.cds_consensus.GroupedByUmi.bam",index = sample_names)
 
 rule DuplexConsensus:
     input:
@@ -133,7 +133,7 @@ rule CDSErrorMetrics:
 
 #group_to_samples = metadata.reset_index().groupby('group_id').sample.agg(list)
 #print(group_to_samples)
-rule MergeGroup:
+rule MergeGroupConsensus:
     input:
          lambda wildcard: expand("consensus/{id}.{{index}}.consensus.aligned.bam", id = batch_ids)
     output:

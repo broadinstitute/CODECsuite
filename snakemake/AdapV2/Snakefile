@@ -77,6 +77,10 @@ rule Demux:
     output:
          read1 = temp(expand("demux/{{batch_id}}_split.{{ss}}.{index}.1.fastq.gz", index = sample_names)),
          read2 = temp(expand("demux/{{batch_id}}_split.{{ss}}.{index}.2.fastq.gz", index = sample_names)),
+         unmatched1 = temp("demux/{batch_id}_split.{ss}.unmatched.1.fastq.gz"),
+         unmatched2 = temp("demux/{batch_id}_split.{ss}.unmatched.2.fastq.gz"),
+         hopped1 = temp("demux/{batch_id}_split.{ss}.hopped.1.fastq.gz"),
+         hopped2 = temp("demux/{batch_id}_split.{ss}.hopped.2.fastq.gz"),
          log = "demux/{batch_id}_split.{ss}.log",
     params:
         sample_sheet = config['sample_sheet'],
@@ -189,8 +193,8 @@ rule MergeSplit:
          bam = expand("tmp/{{batch_id}}_split.{ss}.{{index}}.highconf.aligned.bam", ss=SPLITS),
          bai = expand("tmp/{{batch_id}}_split.{ss}.{{index}}.highconf.aligned.bai", ss=SPLITS)
     output:
-          bam = "tmp/{batch_id}.{index}.raw.aligned.bam",
-          bai = "tmp/{batch_id}.{index}.raw.aligned.bam.bai"
+          bam = temp("tmp/{batch_id}.{index}.raw.aligned.bam"),
+          bai = temp("tmp/{batch_id}.{index}.raw.aligned.bam.bai")
     resources:
           mem = 4,
           ncores = config['ncores']
@@ -200,6 +204,69 @@ rule MergeSplit:
          """
          samtools merge -@ {resources.ncores} {output.bam} {input.bam} && samtools index {output.bam} -@ {resources.ncores}
          """
-#include: "capture_wf_1/Snakefile"
-#include: "capture/Snakefile"
 
+rule MergeRawGroup:
+    input:
+         lambda wildcard: expand("tmp/{batch_id}.{{index}}.raw.aligned.bam", batch_id = batch_ids)
+    output:
+          bam = temp("tmp/{index}.merged.raw.aligned.bam")
+    resources:
+             mem = 8,
+             ncores = config['ncores'],
+             runtime = 16,
+    shell:
+         """
+         samtools merge -@ {resources.ncores} {output.bam} {input}
+         """
+
+rule ReplaceRawReadGroup:
+    input:
+       "tmp/{index}.merged.raw.aligned.bam"
+    output:
+       bam = temp("tmp/{index}.merged.raw.replacerg.bam"),
+       bai = temp("tmp/{index}.merged.raw.replacerg.bai"),
+    params:
+        sid = "{index}"
+    resources:
+        mem = 24,
+        runtime = 16,
+    shell:
+        """
+        {PICARD} AddOrReplaceReadGroups \
+           I={input} \
+           O={output.bam} \
+           CREATE_INDEX=true \
+           RGID=4 \
+           RGLB=lib1 \
+           RGPL=ILLUMINA \
+           RGPU=unit1 \
+           RGSM={params.sid}
+        """
+
+rule MarkRawDuplicates:
+    input:
+        bam = "tmp/{index}.merged.raw.replacerg.bam"
+    resources:
+        mem = 32,
+        runtime = 16,
+    output:
+        bam = "tmp/{index}.merged.raw.replacerg.markdup.bam",
+        met = "metrics/{index}.raw.marked_duplicates.txt"
+    shell:
+        """
+        {PICARD} MarkDuplicates I={input.bam} O={output.bam} M={output.met} CREATE_INDEX=true \
+            TAG_DUPLICATE_SET_MEMBERS=true TAGGING_POLICY=All PG=null BARCODE_TAG=RX DUPLEX_UMI=true
+        """
+
+rule CollectRawWgsMetrics:
+    input:
+         bam = "tmp/{index}.merged.raw.replacerg.markdup.bam",
+    output:
+          metrics = Metrics_OUT + "/{index}.merged.raw.wgs_metrics.txt",
+    params:
+          ref = REF,
+          itl = EVAL_REGION_IL
+    shell:
+         """
+         {PICARD} CollectWgsMetrics I={input.bam} O={output.metrics} R={params.ref} INTERVALS={params.itl} INCLUDE_BQ_HISTOGRAM=true
+         """
