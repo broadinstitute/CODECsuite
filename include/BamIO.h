@@ -197,14 +197,14 @@ class UnMappedBamWriter {
   }
 
 
-  void WriteRecord(const SeqLib::BamRecord & R1, const SeqLib::BamRecord& R2, std::string seq, std::string qual1, std::string qual2) {
+  void WriteRecord(const SeqLib::BamRecord & R1, const SeqLib::BamRecord& R2, std::string seq1, std::string seq2, std::string qual1, std::string qual2) {
     // Write paired end records
     // R1, R2 must be strictly First in pair and, Second in pair
     if (not cpputil::ProperPair(R1) || not cpputil::ProperPair(R2)) {
       throw std::runtime_error("not a proper pair");
     }
-    auto r1 = CreateUBamRecord(R1, seq, qual1, false);
-    auto r2 = CreateUBamRecord(R2, seq, qual2, false);
+    auto r1 = CreateUBamRecord(R1, seq1, qual1, false);
+    auto r2 = CreateUBamRecord(R2, seq2, qual2, false);
     //std::cout << out << std::endl;
     bool status1 = bam_writer_.WriteRecord(r1);
     bool status2 = bam_writer_.WriteRecord(r2);

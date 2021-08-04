@@ -206,10 +206,10 @@ int codec_consensus(int argc, char ** argv) {
             std::vector<std::string> orig_quals; // consensus output
             auto seq = cpputil::MergePair(seg, opt.trim_overhang, opt.minbq, orig_quals); // trim overhang if true
             if (seg.front().FirstFlag()) {
-              writer.WriteRecord(seg.front(), seg.back(), seq, orig_quals.front(), orig_quals.back());
+              writer.WriteRecord(seg.front(), seg.back(), seq.first, seq.second, orig_quals.front(), orig_quals.back());
             }
             else if (seg.back().FirstFlag()) {
-              writer.WriteRecord(seg.back(), seg.front(), seq, orig_quals.back(), orig_quals.front());
+              writer.WriteRecord(seg.back(), seg.front(), seq.second, seq.first, orig_quals.back(), orig_quals.front());
             }
           } else if (opt.allow_nonoverlapping_pair) {
             writer.WriteRecord(seg.front(), seg.back());
