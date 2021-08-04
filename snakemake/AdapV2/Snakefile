@@ -258,15 +258,3 @@ rule MarkRawDuplicates:
             TAG_DUPLICATE_SET_MEMBERS=true TAGGING_POLICY=All PG=null BARCODE_TAG=RX DUPLEX_UMI=true
         """
 
-rule CollectRawWgsMetrics:
-    input:
-         bam = "tmp/{index}.merged.raw.replacerg.markdup.bam",
-    output:
-          metrics = Metrics_OUT + "/{index}.merged.raw.wgs_metrics.txt",
-    params:
-          ref = REF,
-          itl = EVAL_REGION_IL
-    shell:
-         """
-         {PICARD} CollectWgsMetrics I={input.bam} O={output.metrics} R={params.ref} INTERVALS={params.itl} INCLUDE_BQ_HISTOGRAM=true
-         """

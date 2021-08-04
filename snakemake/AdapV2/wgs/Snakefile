@@ -6,10 +6,22 @@ EVAL_REGION_IL= config['region_interval_list']
 rule all:
     input:
          #expand(ACCU_OUT + "/{stype}/{batch_id}.{index}.error_metrics.txt", batch_id = batch_ids, index = sample_names, stype = ["consensus"]),
-         #expand(Metrics_OUT + "/{group}_merged.cds_consensus.mol_consensus.{type}_metrics.txt", group = batch_ids, type=['wgs']),
-         #expand("consensus/{index}.merged.cds_consensus.aligned.bam", index = sample_names),
+         expand("consensus/{index}.merged.cds_consensus.mol_consensus.aligned.bam", index = sample_names),
          expand(Metrics_OUT + "/{index}.merged.cds_consensus.wgs_metrics.txt",index = sample_names),
          expand("groupbyumi/{index}.merged.cds_consensus.GroupedByUmi.bam",index = sample_names)
+
+rule CollectRawWgsMetrics:
+    input:
+         bam = "tmp/{index}.merged.raw.replacerg.markdup.bam",
+    output:
+          metrics = Metrics_OUT + "/{index}.merged.raw.wgs_metrics.txt",
+    params:
+          ref = REF,
+          itl = EVAL_REGION_IL
+    shell:
+         """
+         {PICARD} CollectWgsMetrics I={input.bam} O={output.metrics} R={params.ref} INTERVALS={params.itl} INCLUDE_BQ_HISTOGRAM=true
+         """
 
 rule DuplexConsensus:
     input:
@@ -22,7 +34,7 @@ rule DuplexConsensus:
          runtime = 16
     shell:
          """
-         {CONSENSUS_BIN} -b {input} -o {output.tmp} -m 0 -t -q 0 -p 1 &&
+         {CONSENSUS_BIN} -b {input} -o {output.tmp} -m 0 -C -q 0 -p 1 &&
          {PICARD} SortSam I={output.tmp} O={output.bam} SO=queryname
          """
 
@@ -97,39 +109,6 @@ rule RawErrorMetrics:
                 --read_level_stat {output.readlevel}
          """
 
-rule CDSErrorMetrics:
-    input:
-         bam = "consensus/{sample_id}.{index}.consensus.aligned.bam",
-    output:
-          accu = ACCU_OUT + "/consensus/{sample_id}.{index}.error_metrics.txt",
-          error = ACCU_OUT + "/consensus/{sample_id}.{index}.mutant_families.txt",
-          known = ACCU_OUT + "/consensus/{sample_id}.{index}.known_var.txt",
-    params:
-          ref = REF,
-          mapq = 60,
-          baseq = 30,
-          high_conf_region = EAVL_REGION_BED,
-          germ_vcf = TRUTH_BCF,
-          vcf_sid = config['sampleid']
-    resources:
-             mem = 8,
-             runtime = 96
-    shell:
-         """
-            {ACCU_BIN}  -b {input.bam} \
-                -L {params.high_conf_region} \
-                -m {params.mapq} \
-                -r {params.ref} \
-                -V {params.germ_vcf} \
-                -s {params.vcf_sid} \
-                -x 2 \
-                -p 0 \
-                -d 12 \
-                -q {params.baseq} \
-                -a {output.accu} \
-                -e {output.error} \
-                -k {output.known}
-         """
 
 #group_to_samples = metadata.reset_index().groupby('group_id').sample.agg(list)
 #print(group_to_samples)
@@ -287,6 +266,38 @@ rule CollectWgsMetrics:
     shell:
          """
          {PICARD} CollectWgsMetrics I={input.bam} O={output.metrics} R={params.ref} INTERVALS={params.itl} INCLUDE_BQ_HISTOGRAM=true
+         """
+
+rule CDSErrorMetrics:
+    input:
+         bam = "consensus/{index}.merged.cds_consensus.mol_consensus.aligned.bam",
+    output:
+          accu = ACCU_OUT + "/consensus/{index}.error_metrics.txt",
+          error = ACCU_OUT + "/consensus/{index}.mutant_families.txt",
+          known = ACCU_OUT + "/consensus/{index}.known_var.txt",
+    params:
+          ref = REF,
+          mapq = 60,
+          baseq = 30,
+          high_conf_region = EAVL_REGION_BED,
+          germ_vcf = TRUTH_BCF,
+    resources:
+             mem = 8,
+             runtime = 96
+    shell:
+         """
+            {ACCU_BIN}  -b {input.bam} \
+                -L {params.high_conf_region} \
+                -m {params.mapq} \
+                -r {params.ref} \
+                -V {params.germ_vcf} \
+                -x 2 \
+                -p 0 \
+                -d 12 \
+                -q {params.baseq} \
+                -a {output.accu} \
+                -e {output.error} \
+                -k {output.known}
          """
 
 # rule DeepTools:
