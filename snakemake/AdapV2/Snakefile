@@ -75,8 +75,8 @@ rule Demux:
          read1 = "tmp/{batch_id}_split_r1.{ss}.fastq",
          read2 = "tmp/{batch_id}_split_r2.{ss}.fastq",
     output:
-         read1 = temp(expand("demux/{{batch_id}}_split.{{ss}}.{index}.1.fastq.gz", index = sample_names)),
-         read2 = temp(expand("demux/{{batch_id}}_split.{{ss}}.{index}.2.fastq.gz", index = sample_names)),
+         read1 = expand("demux/{{batch_id}}_split.{{ss}}.{index}.1.fastq.gz", index = sample_names),
+         read2 = expand("demux/{{batch_id}}_split.{{ss}}.{index}.2.fastq.gz", index = sample_names),
          unmatched1 = temp("demux/{batch_id}_split.{ss}.unmatched.1.fastq.gz"),
          unmatched2 = temp("demux/{batch_id}_split.{ss}.unmatched.2.fastq.gz"),
          hopped1 = temp("demux/{batch_id}_split.{ss}.hopped.1.fastq.gz"),
@@ -125,6 +125,7 @@ rule SortInQueryOrder:
           temp("adap_trimmed/{batch_id}_split.{ss}.{index}.{type}.querysort.bam"),
     resources:
         mem = 16,
+        runtime = 2,
     wildcard_constraints:
         index = "[0-9a-zA-Z_]+"
     shell:
@@ -147,7 +148,7 @@ rule AlignRawTrimmed:
     resources:
              mem = 8,
              ncores = config['ncores'],
-             runtime = 16
+             runtime = 4
     wildcard_constraints:
           index = "[0-9a-zA-Z_]+"
     shell:
