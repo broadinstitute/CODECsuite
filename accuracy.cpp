@@ -37,6 +37,7 @@
 
 #define OPT_QSCORE_PROF   261
 #define OPT_READ_LEVEL_STAT   262
+#define OPT_CYCLE_LEVEL_STAT   263
 using std::string;
 using std::vector;
 int MYINT_MAX = std::numeric_limits<int>::max();
@@ -62,6 +63,7 @@ struct AccuOptions {
   //string qscore_prof;
   bool detail_qscore_prof = false;
   string read_level_stat;
+  string cycle_level_stat;
   //double min_frac_bqual_pass = 0.1;
   int pair_min_overlap = 0;
   bool overlap_only = false;
@@ -97,6 +99,7 @@ static struct option  accuracy_long_options[] = {
     //{"qscore_prof",              required_argument,      0,        OPT_QSCORE_PROF},
     {"detail_qscore_prof",       no_argument,            0,        OPT_QSCORE_PROF},
     {"read_level_stat",          required_argument,      0,        OPT_READ_LEVEL_STAT},
+    {"cycle_level_stat",         required_argument,      0,        OPT_CYCLE_LEVEL_STAT},
     {0,0,0,0}
 };
 
@@ -124,7 +127,8 @@ void accuracy_print_help()
   std::cerr<< "-k/--known_var_out,                    Output for known var. [known_var_out.txt].\n";
   //std::cerr<< "--qscore_prof,                         Output qscore prof. First column is qscore cutoff; second column is number of bases in denominator\n";
   std::cerr<< "--detail_qscore_prof,                  Output finer scale qscore cutoffs, error rates profile. The default is only q0, q30 [false]. \n";
-  std::cerr<< "--read_level_stat,                     Output read level stat.\n";
+  std::cerr<< "--read_level_stat,                     Output read level error metrics.\n";
+  std::cerr<< "--cycle_level_stat,                    Output cycle level error metrics.\n";
   std::cerr<< "\nFiltering Options:\n";
   std::cerr<< "-q/--bqual_min,                        Skip bases if min(q1, q2) < this when calculating error rate. q1, q2 are baseQ from R1 and R2 respectively [0].\n";
   std::cerr<< "-n/--max_edit_filter,                  Skip a read if its NM tag is larger than this value [INT_MAX].\n";
@@ -207,6 +211,9 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
       case OPT_READ_LEVEL_STAT:
         opt.read_level_stat = optarg;
         break;
+      case OPT_CYCLE_LEVEL_STAT:
+        opt.cycle_level_stat = optarg;
+        break;
       case 'p':
         opt.pair_min_overlap = atoi(optarg);
         break;
@@ -243,8 +250,8 @@ struct ErrorStat {
   ErrorStat(int L) {
     cutoffs = {0, 30};
     qcut_neval[0] = std::make_pair(0,0);
-    qcut_neval[0] = std::make_pair(0,0);
-    qcut_nerrors[30] = std::make_pair(0,0);
+    qcut_neval[30] = std::make_pair(0,0);
+    qcut_nerrors[0] = std::make_pair(0,0);
     qcut_nerrors[30] = std::make_pair(0,0);
     Init(L);
   }
@@ -436,7 +443,9 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
       errorstat.base_counter[bi] += (den[bi] + den[bi + 4]);
     }
     errorstat.neval += std::accumulate(den.begin(), den.end(), 0);
-    CycleBaseCount(seg, gr, errorstat);
+    if (!opt.cycle_level_stat.empty()) {
+      CycleBaseCount(seg, gr, errorstat);
+    }
 
     // first pass gets all variants in ROI
     std::map<cpputil::Variant, vector<cpputil::Variant>> var_vars;
@@ -465,11 +474,15 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
     // second pass classifies the variants
     for (const auto& duo: var_vars) {
       // filter cases when R1 and R2 disagree
+      // i) on bases
+      // ii) on quality scores, i.e., one pass min_baseq and the other failed.
       bool pass = true;
+      //i)
       if (duo.second.size() < 2) {
         if (duo.second[0].Type() == "SNV" and duo.second[0].var_qual >= opt.bqual_min) --errorstat.neval;
         pass = false;
       }
+      //ii)
       if (duo.second.size() == 2 and duo.second[0].Type() == "SNV" and duo.second[1].Type() == "SNV" and
           ((duo.second[0].var_qual < opt.bqual_min and duo.second[1].var_qual >= opt.bqual_min)
           or (duo.second[0].var_qual >= opt.bqual_min and duo.second[1].var_qual < opt.bqual_min))) {
@@ -567,6 +580,7 @@ int codec_accuracy(int argc, char ** argv) {
   std::ofstream ferr(opt.error_prof_out);
   std::ofstream known(opt.known_var_out);
   std::ofstream readlevel;
+  std::ofstream cyclelevel;
   string error_profile_header =
       "chrom\tref_pos\tref\talt\ttype\tread_pos\tsnv_base_qual\tfirst_of_pair\tread_name\tconcordant";
   ferr << error_profile_header << std::endl;
@@ -579,6 +593,12 @@ int codec_accuracy(int argc, char ** argv) {
     string read_level_header =
         "read_name\tR1_q0_nerror\tR1_q0_efflen\tR1_q30_nerror\tR1_q30_efflen\tR2_q0_nerror\tR2_q0_efflen\tR2_q30_nerror\tR2_q30_efflen\tfraglen";
     readlevel << read_level_header << std::endl;
+  }
+  if (not opt.cycle_level_stat.empty()) {
+    cyclelevel.open(opt.cycle_level_stat);
+    cyclelevel << "cycle\tR1_q0_error\tR1_q0_cov\tR1_q30_error\tR1_q30_cov\t"
+            "R2_q0_error\tR2_q0_cov\tR2_q30_error\tR2_q30_cov\t"
+            "R1_q0_erate\tR1_q30_erate\tR2_q0_erate\tR2_q30_erate\n";
   }
   cpputil::InsertSeqFactory isf(opt.bam, opt.mapq, opt.load_supplementary, opt.load_secondary, opt.load_duplicate, false);
 //  SeqLib::BamWriter trim_bam_writer;
@@ -676,19 +696,18 @@ int codec_accuracy(int argc, char ** argv) {
     else stat << '\t';
   }
 
-  stat << "cycle\tR1_q0_error\tR1_q0_cov\tR1_q30_error\tR1_q30_cov\t"
-          "R2_q0_error\tR2_q0_cov\tR2_q30_error\tR2_q30_cov\t"
-          "R1_q0_erate\tR1_q30_erate\tR2_q0_erate\tR2_q30_erate\n";
-  for (int i = 0; i < L; ++i) {
-    stat << i << '\t';
-    stat << errorstat.R1_q0_error[i] << '\t' << errorstat.R1_q0_cov[i] << '\t';
-    stat << errorstat.R1_q30_error[i] << '\t' << errorstat.R1_q30_cov[i] << '\t';
-    stat << errorstat.R2_q0_error[i] << '\t' << errorstat.R2_q0_cov[i] << '\t';
-    stat << errorstat.R2_q30_error[i] << '\t' << errorstat.R2_q30_cov[i] << '\t';
-    stat << (float) errorstat.R1_q0_error[i] / errorstat.R1_q0_cov[i] << '\t';
-    stat << (float) errorstat.R1_q30_error[i] / errorstat.R1_q30_cov[i] << '\t';
-    stat << (float) errorstat.R2_q0_error[i] / errorstat.R2_q0_cov[i] << '\t';
-    stat << (float) errorstat.R2_q30_error[i] / errorstat.R2_q30_cov[i] << '\n';
+  if (!opt.cycle_level_stat.empty()) {
+    for (int i = 0; i < L; ++i) {
+     cyclelevel  << i << '\t';
+     cyclelevel  << errorstat.R1_q0_error[i] << '\t' << errorstat.R1_q0_cov[i] << '\t';
+     cyclelevel  << errorstat.R1_q30_error[i] << '\t' << errorstat.R1_q30_cov[i] << '\t';
+     cyclelevel  << errorstat.R2_q0_error[i] << '\t' << errorstat.R2_q0_cov[i] << '\t';
+     cyclelevel  << errorstat.R2_q30_error[i] << '\t' << errorstat.R2_q30_cov[i] << '\t';
+     cyclelevel  << (float) errorstat.R1_q0_error[i] / errorstat.R1_q0_cov[i] << '\t';
+     cyclelevel  << (float) errorstat.R1_q30_error[i] / errorstat.R1_q30_cov[i] << '\t';
+     cyclelevel  << (float) errorstat.R2_q0_error[i] / errorstat.R2_q0_cov[i] << '\t';
+     cyclelevel  << (float) errorstat.R2_q30_error[i] / errorstat.R2_q30_cov[i] << '\n';
+    }
   }
   return 0;
 }
