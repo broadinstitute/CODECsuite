@@ -52,6 +52,7 @@ struct AccuOptions {
   bool load_secondary = false;
   bool load_unpair = false;
   bool load_duplicate = false;
+  bool all_mutant_frags = false;
   int max_nm_filter = MYINT_MAX;
   int max_mismatch_filter = MYINT_MAX;
   int verbose = 0;
@@ -66,7 +67,7 @@ struct AccuOptions {
   string cycle_level_stat;
   //double min_frac_bqual_pass = 0.1;
   int pair_min_overlap = 0;
-  bool overlap_only = false;
+  bool count_nonoverlap = false;
   string maf_file;
   string bed_file;
   string trim_bam = "trimmed.bam";
@@ -91,19 +92,19 @@ static struct option  accuracy_long_options[] = {
     //{"min_frac_bqual_pass",      required_argument,      0,        'F'},
     {"known_var_out",            required_argument,      0,        'k'},
     {"pair_min_overlap",         required_argument,      0,        'p'},
-    {"overlap_only",             no_argument,            0,        'O'},
+    {"count_nonoverlap",         no_argument,            0,        'c'},
     {"fragend_dist_filter",      required_argument,      0,        'd'},
     {"max_nm_filter",            required_argument,      0,        'n'},
     {"max_mismatch_filter",      required_argument,      0,        'x'},
     {"verbose",                  required_argument,      0,        'v'},
-    //{"qscore_prof",              required_argument,      0,        OPT_QSCORE_PROF},
+    {"all_mutant_frags",         no_argument,             0,        'A'},
     {"detail_qscore_prof",       no_argument,            0,        OPT_QSCORE_PROF},
     {"read_level_stat",          required_argument,      0,        OPT_READ_LEVEL_STAT},
     {"cycle_level_stat",         required_argument,      0,        OPT_CYCLE_LEVEL_STAT},
     {0,0,0,0}
 };
 
-const char* accuracy_short_options = "b:a:m:v:S2us:r:e:q:k:OM:p:d:n:x:V:L:D";
+const char* accuracy_short_options = "b:a:m:v:S2us:r:e:q:k:cM:p:d:n:x:V:L:DA";
 
 void accuracy_print_help()
 {
@@ -136,7 +137,8 @@ void accuracy_print_help()
   std::cerr<< "-d/--fragend_dist_filter,              Consider a variant if its distance to the fragment end is at least this value [0].\n";
   //std::cerr<< "-F/--min_frac_bqual_pass,              If bqual_min is none 0. The number of bases passing bqual filter has to be larger than or equal to this frac [0.1].\n";
   std::cerr<< "-p/--pair_min_overlap,                 When using selector, the minimum overlap between the two ends of the pair. -1 for complete overlap, 0 no overlap required [0].\n";
-  std::cerr<< "-O/--overlap_only,                     Count only overlapped region of a read pair. Default [false].\n";
+  std::cerr<< "-c/--count_nonoverlap,                 Count overhang (non overlapping) region of a read pair. Default [false].\n";
+  std::cerr<< "-A/--all_mutant_frags,                  Output all mutant fragments even if failed by concordant or qscore filters Default [false].\n";
 }
 
 int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
@@ -184,8 +186,8 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
         break;
       case 'D':
         opt.load_duplicate = true;
-      case 'O':
-        opt.overlap_only = true;
+      case 'c':
+        opt.count_nonoverlap = true;
         break;
       case 's':
         opt.sample = optarg;
@@ -217,6 +219,9 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
       case 'p':
         opt.pair_min_overlap = atoi(optarg);
         break;
+      case 'A':
+        opt.all_mutant_frags = true;
+        break;
       default:accuracy_print_help();
         return 1;
     }
@@ -242,6 +247,8 @@ struct ErrorStat {
   vector<int64_t> R2_q0_error;
   vector<int64_t> R2_q30_error;
   vector<int64_t> base_counter;
+  vector<int64_t> triplet_counter;
+  vector<int64_t> doublet_counter;
   //qscore cutoff -> read1, read2
   std::map<int, std::pair<int64_t, int64_t>> qcut_neval;
   std::map<int, std::pair<int64_t, int64_t>> qcut_nerrors;
@@ -374,6 +381,14 @@ void CycleBaseCount(const cpputil::Segments& seg,
 
 }
 
+
+int n_false_mut(vector<bool> v) {
+  return count(v.begin(), v.end(), false);
+}
+int n_true_mut(vector<bool> v) {
+  return count(v.begin(), v.end(), true);
+}
+
 void ErrorRateDriver(const vector<cpputil::Segments>& frag,
                     const SeqLib::BamHeader& bamheader,
                     const SeqLib::RefGenome& ref,
@@ -422,15 +437,17 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
     int r1_q0_den = 0, r2_q0_den = 0;
     int r1_q30_den =0, r2_q30_den = 0;
     for (int qcut : errorstat.cutoffs) {
-      auto res = NumEffBases(seg, gr, qcut, not opt.overlap_only);
+      auto res = NumEffBases(seg, gr, qcut, opt.count_nonoverlap);
       errorstat.qcut_neval[qcut].first += std::accumulate(res.begin(), res.begin() + 4, 0);
       errorstat.qcut_neval[qcut].second += std::accumulate(res.begin() + 4, res.end(), 0);
-      if (qcut == 0) {
-        r1_q0_den = std::accumulate(res.begin(), res.begin() + 4, 0);
-        r2_q0_den = std::accumulate(res.begin() + 4, res.end(), 0);
-      } else if (qcut == 30) {
-        r1_q30_den = std::accumulate(res.begin(), res.begin() + 4, 0);
-        r2_q30_den = std::accumulate(res.begin() + 4, res.end(), 0);
+      if (!opt.read_level_stat.empty()) {
+        if (qcut == 0) {
+          r1_q0_den = std::accumulate(res.begin(), res.begin() + 4, 0);
+          r2_q0_den = std::accumulate(res.begin() + 4, res.end(), 0);
+        } else if (qcut == 30) {
+          r1_q30_den = std::accumulate(res.begin(), res.begin() + 4, 0);
+          r2_q30_den = std::accumulate(res.begin() + 4, res.end(), 0);
+        }
       }
     }
 
@@ -438,7 +455,7 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
     int r1_q0_nerror = 0, r2_q0_nerror = 0;
     int r1_q30_nerror = 0, r2_q30_nerror = 0;
     // get denominator
-    auto den = NumEffBases(seg, gr, opt.bqual_min, not opt.overlap_only);
+    auto den = NumEffBases(seg, gr, opt.bqual_min, opt.count_nonoverlap);
     for (unsigned bi = 0; bi < 4; ++bi) {
       errorstat.base_counter[bi] += (den[bi] + den[bi + 4]);
     }
@@ -451,7 +468,7 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
     std::map<cpputil::Variant, vector<cpputil::Variant>> var_vars;
     int rstart = 0;
     int rend = std::numeric_limits<int>::max();
-    if (not opt.overlap_only) {
+    if (opt.count_nonoverlap) {
       if (gr) {
         rstart = gr->pos1;
         rend = gr->pos2;
@@ -471,69 +488,107 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
           var_vars[var].push_back(var);
       }
     }
-    // second pass classifies the variants
-    for (const auto& duo: var_vars) {
+
+    // Currenlty, always assume the variants are concordance between R1 and R2
+    //TODO: if count_nonoverlap == true, allow single variants in the overhang regions.
+    std::vector<std::vector<cpputil::Variant>> quality_masked;
+    quality_masked.reserve(var_vars.size());
+    //break doublets and etc. if not all bases are satisfying baseq cutoff.
+    for (const auto& it: var_vars) {
+      if(it.second.size() == 1) {
+        quality_masked.push_back(it.second);
+      } else {
+        auto vars = cpputil::varpair_consolidate(it.second[0], it.second[1], opt.bqual_min);
+        quality_masked.insert(quality_masked.end(), vars.begin(), vars.end());
+      }
+    }
+    for (const auto& readpair: quality_masked) {
       // filter cases when R1 and R2 disagree
       // i) on bases
       // ii) on quality scores, i.e., one pass min_baseq and the other failed.
-      bool pass = true;
-      //i)
-      if (duo.second.size() < 2) {
-        if (duo.second[0].Type() == "SNV" and duo.second[0].var_qual >= opt.bqual_min) --errorstat.neval;
-        pass = false;
-      }
-      //ii)
-      if (duo.second.size() == 2 and duo.second[0].Type() == "SNV" and duo.second[1].Type() == "SNV" and
-          ((duo.second[0].var_qual < opt.bqual_min and duo.second[1].var_qual >= opt.bqual_min)
-          or (duo.second[0].var_qual >= opt.bqual_min and duo.second[1].var_qual < opt.bqual_min))) {
-        --errorstat.neval;
-        pass = false;
-      }
-
-      for (const auto& var : duo.second) {
-        if (pass && bcf_reader.IsOpen()
-            && bcf_reader.var_exist(var.contig, var.contig_start, var.alt_seq.c_str())) { // known var
-          known << var << '\t' << "PRI_VCF" << '\n';
+//      bool pass = true;
+//      //i)
+//      if (duo.second.size() < 2) {
+//        pass = false;
+//        if (duo.second[0].Type() == "SNV" and duo.second[0].var_qual >= opt.bqual_min)
+//          errorstat.neval -= duo.second[0].alt_seq.size();
+//      }
+//      //ii)
+//      if (duo.second.size() == 2 and duo.second[0].Type() == "SNV" and duo.second[1].Type() == "SNV" and
+//          ((duo.second[0].var_qual < opt.bqual_min and duo.second[1].var_qual >= opt.bqual_min)
+//          or (duo.second[0].var_qual >= opt.bqual_min and duo.second[1].var_qual < opt.bqual_min))) {
+//        errorstat.neval -= duo.first.alt_seq.size();
+//        pass = false;
+//      }
+      for (const auto& var : readpair) {
+        vector<bool> real_muts;
+        bool found;
+        if (var.Type() == "SNV") {
+          real_muts.resize(var.alt_seq.size(), false);
         }
-        else if (pass && bcf_reader2.IsOpen()
-            && bcf_reader2.var_exist(var.contig, var.contig_start, var.alt_seq.c_str())) { // second known var
-          known << var << '\t' << "SEC_VCF" << '\n';
-          if (var.Type() == "SNV") {
-            errorstat.nerror_masked_by_vcf2 += 1;
-          }
+        if (bcf_reader.IsOpen()) {
+           found = cpputil::search_var_in_database(bcf_reader, var, known, "PRI_VCF", real_muts);
         }
-        else if (pass && mafr.IsOpen()
-            && mafr.VarExist(var.contig, var.contig_start + 1, var.alt_seq)) { //known maf site
-          known << var << '\t' << "MAF" << '\n';
+        if (bcf_reader2.IsOpen() && not found){
+          found = cpputil::search_var_in_database(bcf_reader2, var, known, "SEC_VCF", real_muts);
         }
-        else { // error site
+        if (mafr.IsOpen() && not found) {
+          found = cpputil::search_var_in_database(mafr, var, known, "MAF", real_muts);
+        }
+        if (not found) { // error site
           // other error profiles
+          int nerr = n_false_mut(real_muts);
           if (var.Type() == "SNV") {
             for (int qcut : errorstat.cutoffs) {
               if (var.var_qual >= qcut) {
-                var.first_of_pair ? ++errorstat.qcut_nerrors[qcut].first: ++errorstat.qcut_nerrors[qcut].second;
-                if (qcut == 0) {var.first_of_pair ? ++r1_q0_nerror : ++r2_q0_nerror;}
-                if (qcut == 30) {var.first_of_pair ? ++r1_q30_nerror : ++r2_q30_nerror;}
+                if (var.first_of_pair) {
+                  errorstat.qcut_nerrors[qcut].first += nerr;
+                } else {
+                  errorstat.qcut_nerrors[qcut].second += nerr;
+                }
+                if (!opt.read_level_stat.empty()) {
+                  if (qcut == 0) {
+                    if (var.first_of_pair ) r1_q0_nerror += nerr;
+                    else r2_q0_nerror += nerr;
+                  }
+                  if (qcut == 30) {
+                    if (var.first_of_pair ) r1_q30_nerror += nerr;
+                    else r2_q30_nerror += nerr;
+                  }
+                }
               }
             }
-            //pos profile
-            int tpos = var.alt_start < 0 ?  abs(var.alt_start + 1): var.alt_start;
-            var.first_of_pair ? errorstat.R1_q0_error[tpos] += 1 : errorstat.R2_q0_error[tpos] += 1;
-            if (var.var_qual >= 30) {
-              var.first_of_pair ? errorstat.R1_q30_error[tpos] += 1: errorstat.R2_q30_error[tpos] += 1;
+            //per cycle profile
+            if (!opt.cycle_level_stat.empty()) {
+              int tpos = var.alt_start < 0 ?  abs(var.alt_start + 1): var.alt_start;
+              var.first_of_pair ? errorstat.R1_q0_error[tpos] += nerr : errorstat.R2_q0_error[tpos] += nerr;
+              if (var.var_qual >= 30) {
+                var.first_of_pair ? errorstat.R1_q30_error[tpos] += nerr: errorstat.R2_q30_error[tpos] += nerr;
+              }
             }
           } //end other profiles
 
-          if (not pass) continue;
-          if (var.Type() == "SNV") {
-            if (var.var_qual >= opt.bqual_min) {
-              num += 1;
-              ferr << var << '\t' << (duo.second.size() == 2 ? 1 : 0) << '\n'; // concordant or not
-            }
-          } else { // indel
-            ferr << var << '\t' << (duo.second.size() == 2 ? 1 : 0) << '\n'; // concordant or not
+          if (var.Type() == "SNV" && var.var_qual >= opt.bqual_min && readpair.size() == 2) {
+            num += nerr;
           }
-
+          if (n_true_mut(real_muts) > 0) { // partially match
+            auto avars = cpputil::var_atomize(var);
+            for (unsigned ai = 0; ai < real_muts.size(); ++ai) {
+              if (not real_muts[ai]) {
+                if (opt.all_mutant_frags) ferr << avars[ai] << '\n';
+                else {
+                  if (avars[ai].var_qual >= opt.bqual_min && readpair.size() == 2)
+                    ferr << avars[ai] << '\n';
+                }
+              }
+            }
+          } else {
+            if (opt.all_mutant_frags) ferr << var << '\n';
+            else {
+              if ((var.isIndel() || var.var_qual >= opt.bqual_min) && readpair.size() == 2)
+                ferr << var << '\n';
+            }
+          }
         }
       }
     }
@@ -582,7 +637,7 @@ int codec_accuracy(int argc, char ** argv) {
   std::ofstream readlevel;
   std::ofstream cyclelevel;
   string error_profile_header =
-      "chrom\tref_pos\tref\talt\ttype\tread_pos\tsnv_base_qual\tfirst_of_pair\tread_name\tconcordant";
+      "chrom\tref_pos\tref\talt\ttype\tread_pos\tsnv_base_qual\tfirst_of_pair\tread_name";
   ferr << error_profile_header << std::endl;
 
   string known_var_header =
