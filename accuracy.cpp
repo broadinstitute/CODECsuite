@@ -255,16 +255,17 @@ struct ErrorStat {
 
   //ErrorStat() = delete;
   ErrorStat(int L) {
-    cutoffs = {0, 30};
+    cutoffs = {0};
+    //cutoffs = {0, 30};
     qcut_neval[0] = std::make_pair(0,0);
-    qcut_neval[30] = std::make_pair(0,0);
+    //qcut_neval[30] = std::make_pair(0,0);
     qcut_nerrors[0] = std::make_pair(0,0);
-    qcut_nerrors[30] = std::make_pair(0,0);
+    //qcut_nerrors[30] = std::make_pair(0,0);
     Init(L);
   }
   ErrorStat(const vector<int>& qcuts, int L): cutoffs(qcuts){
     assert(std::find(qcuts.begin(), qcuts.end(), 0) != qcuts.end());
-    assert(std::find(qcuts.begin(), qcuts.end(), 30) != qcuts.end());
+    //assert(std::find(qcuts.begin(), qcuts.end(), 30) != qcuts.end());
     for (auto q : qcuts) {
       qcut_neval[q] = std::make_pair(0,0);
       qcut_nerrors[q] = std::make_pair(0,0);
@@ -288,6 +289,7 @@ struct ErrorStat {
 
 std::vector<int> NumEffBases(const cpputil::Segments& seg,
     const SeqLib::GenomicRegion* const gr,
+    std::set<int> blacklist,
     int minbq,
     bool count_overhang){
   //return a vector of size 8. A,C,G,T count, first read1, then read2
@@ -302,10 +304,10 @@ std::vector<int> NumEffBases(const cpputil::Segments& seg,
       range.second = seg.front().AlignmentEndPosition();
     }
     if (seg.front().FirstFlag()) {
-      r1 = cpputil::CountValidBaseInMatchedBases(seg.front(), minbq, range.first, range.second);
+      r1 = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, range.first, range.second);
     }
     else {
-      r2 = cpputil::CountValidBaseInMatchedBases(seg.front(), minbq, range.first, range.second);
+      r2 = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, range.first, range.second);
     }
   } else {
     std::pair<int, int> overlap_front, overlap_back;
@@ -330,11 +332,11 @@ std::vector<int> NumEffBases(const cpputil::Segments& seg,
       range_back.second = std::min(range_back.second, overlap_back.second);
     }
     if (seg.front().FirstFlag()) {
-      r1 = cpputil::CountValidBaseInMatchedBases(seg.front(), minbq, range_front.first, range_front.second);
-      r2 = cpputil::CountValidBaseInMatchedBases(seg.back(), minbq, range_back.first, range_back.second);
+      r1 = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, range_front.first, range_front.second);
+      r2 = cpputil::CountValidBaseInMatchedBases(seg.back(), blacklist, minbq, range_back.first, range_back.second);
     } else {
-      r2 = cpputil::CountValidBaseInMatchedBases(seg.front(), minbq, range_front.first, range_front.second);
-      r1 = cpputil::CountValidBaseInMatchedBases(seg.back(),  minbq, range_back.first, range_back.second);
+      r2 = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, range_front.first, range_front.second);
+      r1 = cpputil::CountValidBaseInMatchedBases(seg.back(), blacklist, minbq, range_back.first, range_back.second);
     }
   }
   r1.insert(r1.end(), r2.begin(), r2.end());
@@ -393,6 +395,7 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
                     const SeqLib::BamHeader& bamheader,
                     const SeqLib::RefGenome& ref,
                     const SeqLib::GenomicRegion* const gr,
+                    const std::set<int> blacklist,
                     const AccuOptions& opt,
                     const cpputil::BCFReader& bcf_reader,
                     const cpputil::BCFReader& bcf_reader2,
@@ -433,11 +436,14 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
       cpputil::TrimSingleFromFragEnd(seg.front(), opt.fragend_dist_filter);
     }
 
-
+    //for readlevel output
     int r1_q0_den = 0, r2_q0_den = 0;
     int r1_q30_den =0, r2_q30_den = 0;
+    int r1_q0_nerror = 0, r2_q0_nerror = 0;
+    int r1_q30_nerror = 0, r2_q30_nerror = 0;
+
     for (int qcut : errorstat.cutoffs) {
-      auto res = NumEffBases(seg, gr, qcut, opt.count_nonoverlap);
+      auto res = NumEffBases(seg, gr, blacklist, qcut, opt.count_nonoverlap);
       errorstat.qcut_neval[qcut].first += std::accumulate(res.begin(), res.begin() + 4, 0);
       errorstat.qcut_neval[qcut].second += std::accumulate(res.begin() + 4, res.end(), 0);
       if (!opt.read_level_stat.empty()) {
@@ -452,10 +458,8 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
     }
 
     int num = 0;
-    int r1_q0_nerror = 0, r2_q0_nerror = 0;
-    int r1_q30_nerror = 0, r2_q30_nerror = 0;
     // get denominator
-    auto den = NumEffBases(seg, gr, opt.bqual_min, opt.count_nonoverlap);
+    auto den = NumEffBases(seg, gr, blacklist, opt.bqual_min, opt.count_nonoverlap);
     for (unsigned bi = 0; bi < 4; ++bi) {
       errorstat.base_counter[bi] += (den[bi] + den[bi + 4]);
     }
@@ -493,33 +497,22 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
     //TODO: if count_nonoverlap == true, allow single variants in the overhang regions.
     std::vector<std::vector<cpputil::Variant>> quality_masked;
     quality_masked.reserve(var_vars.size());
-    //break doublets and etc. if not all bases are satisfying baseq cutoff.
+    //Consolidate SNPs which has too purposes:
+    // 1. change the variant quality of both reads to the lowest one so that they can be filtered of keep as a whole
+    // 2. break doublets and etc. if not all bases are satisfying baseq cutoff.
     for (const auto& it: var_vars) {
+      if (it.first.isIndel()) {
+        quality_masked.push_back(it.second);
+        continue;
+      }
       if(it.second.size() == 1) {
         quality_masked.push_back(it.second);
       } else {
-        auto vars = cpputil::varpair_consolidate(it.second[0], it.second[1], opt.bqual_min);
+        auto vars = cpputil::snppair_consolidate(it.second[0], it.second[1], opt.bqual_min);
         quality_masked.insert(quality_masked.end(), vars.begin(), vars.end());
       }
     }
     for (const auto& readpair: quality_masked) {
-      // filter cases when R1 and R2 disagree
-      // i) on bases
-      // ii) on quality scores, i.e., one pass min_baseq and the other failed.
-//      bool pass = true;
-//      //i)
-//      if (duo.second.size() < 2) {
-//        pass = false;
-//        if (duo.second[0].Type() == "SNV" and duo.second[0].var_qual >= opt.bqual_min)
-//          errorstat.neval -= duo.second[0].alt_seq.size();
-//      }
-//      //ii)
-//      if (duo.second.size() == 2 and duo.second[0].Type() == "SNV" and duo.second[1].Type() == "SNV" and
-//          ((duo.second[0].var_qual < opt.bqual_min and duo.second[1].var_qual >= opt.bqual_min)
-//          or (duo.second[0].var_qual >= opt.bqual_min and duo.second[1].var_qual < opt.bqual_min))) {
-//        errorstat.neval -= duo.first.alt_seq.size();
-//        pass = false;
-//      }
       for (const auto& var : readpair) {
         vector<bool> real_muts;
         bool found;
@@ -527,17 +520,43 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
           real_muts.resize(var.alt_seq.size(), false);
         }
         if (bcf_reader.IsOpen()) {
-           found = cpputil::search_var_in_database(bcf_reader, var, known, "PRI_VCF", real_muts);
+           found = cpputil::search_var_in_database(bcf_reader, var, known, "PRI_VCF", real_muts, true, opt.bqual_min, opt.all_mutant_frags);
         }
-        if (bcf_reader2.IsOpen() && not found){
-          found = cpputil::search_var_in_database(bcf_reader2, var, known, "SEC_VCF", real_muts);
+        if (bcf_reader2.IsOpen() && not found) {
+          int maskbyvcf1 = n_true_mut(real_muts);
+          found = cpputil::search_var_in_database(bcf_reader2, var, known, "SEC_VCF", real_muts, true, opt.bqual_min, opt.all_mutant_frags);
+          if (var.Type() == "SNV" and var.var_qual >= opt.bqual_min)
+            errorstat.nerror_masked_by_vcf2 += n_true_mut(real_muts) - maskbyvcf1;
         }
         if (mafr.IsOpen() && not found) {
-          found = cpputil::search_var_in_database(mafr, var, known, "MAF", real_muts);
+          found = cpputil::search_var_in_database(mafr, var, known, "MAF", real_muts, true, opt.bqual_min, opt.all_mutant_frags);
         }
         if (not found) { // error site
-          // other error profiles
           int nerr = n_false_mut(real_muts);
+          if (var.Type() == "SNV" && var.var_qual >= opt.bqual_min && readpair.size() == 2) {
+            num += nerr;
+          }
+          // detail error profiles
+          if (n_true_mut(real_muts) > 0) { // partially match
+            auto avars = cpputil::var_atomize(var);
+            for (unsigned ai = 0; ai < real_muts.size(); ++ai) {
+              if (not real_muts[ai]) {
+                if (opt.all_mutant_frags) ferr << avars[ai] << '\n';
+                else {
+                  if (avars[ai].var_qual >= opt.bqual_min && readpair.size() == 2)
+                    ferr << avars[ai] << '\n';
+                }
+              }
+            }
+          } else {
+            if (opt.all_mutant_frags) ferr << var << '\n';
+            else {
+              if ((var.isIndel() || var.var_qual >= opt.bqual_min) && readpair.size() == 2)
+                ferr << var << '\n';
+            }
+          }
+
+          // other error profiles
           if (var.Type() == "SNV") {
             for (int qcut : errorstat.cutoffs) {
               if (var.var_qual >= qcut) {
@@ -567,28 +586,6 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
               }
             }
           } //end other profiles
-
-          if (var.Type() == "SNV" && var.var_qual >= opt.bqual_min && readpair.size() == 2) {
-            num += nerr;
-          }
-          if (n_true_mut(real_muts) > 0) { // partially match
-            auto avars = cpputil::var_atomize(var);
-            for (unsigned ai = 0; ai < real_muts.size(); ++ai) {
-              if (not real_muts[ai]) {
-                if (opt.all_mutant_frags) ferr << avars[ai] << '\n';
-                else {
-                  if (avars[ai].var_qual >= opt.bqual_min && readpair.size() == 2)
-                    ferr << avars[ai] << '\n';
-                }
-              }
-            }
-          } else {
-            if (opt.all_mutant_frags) ferr << var << '\n';
-            else {
-              if ((var.isIndel() || var.var_qual >= opt.bqual_min) && readpair.size() == 2)
-                ferr << var << '\n';
-            }
-          }
         }
       }
     }
@@ -683,8 +680,15 @@ int codec_accuracy(int argc, char ** argv) {
       std::cerr << i + 1 << " region processed. Last position: " << gr << std::ctime(&timenow) << std::endl;
     }
     if (isf.ReadByRegion(cpputil::ArePEAlignmentOverlapAtLeastK, gr, chunk, opt.pair_min_overlap, "", opt.load_unpair)) {
+      std::set<int32_t> blacklist;
+      if (bcf_reader.IsOpen()) {
+        bcf_reader.vcf_to_blacklist_snv(gr, isf.bamheader(), blacklist);
+      }
+      if (bcf_reader2.IsOpen()) {
+        bcf_reader.vcf_to_blacklist_snv(gr, isf.bamheader(), blacklist);
+      }
       for (auto frag : chunk) {
-        ErrorRateDriver(frag, isf.bamheader(), ref, &gr, opt,
+        ErrorRateDriver(frag, isf.bamheader(), ref, &gr, blacklist, opt,
                         bcf_reader, bcf_reader2,
                         mafr, ferr, known, readlevel, errorstat);
       } // end for
