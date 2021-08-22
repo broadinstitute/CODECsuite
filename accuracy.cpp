@@ -34,6 +34,7 @@
 #include "StringUtils.h"
 #include "MAF.h"
 #include "TargetLayout.h"
+#include "MutCounter.h"
 
 #define OPT_QSCORE_PROF   261
 #define OPT_READ_LEVEL_STAT   262
@@ -61,7 +62,7 @@ struct AccuOptions {
   string reference;
   int fragend_dist_filter = 0;
   string known_var_out = "known_var_out.txt";
-  //string qscore_prof;
+  string context_count = "context_count.txt";
   bool detail_qscore_prof = false;
   string read_level_stat;
   string cycle_level_stat;
@@ -91,6 +92,7 @@ static struct option  accuracy_long_options[] = {
     {"bqual_min",                required_argument,      0,        'q'},
     //{"min_frac_bqual_pass",      required_argument,      0,        'F'},
     {"known_var_out",            required_argument,      0,        'k'},
+    {"context_count",            required_argument,      0,        'C'},
     {"pair_min_overlap",         required_argument,      0,        'p'},
     {"count_nonoverlap",         no_argument,            0,        'c'},
     {"fragend_dist_filter",      required_argument,      0,        'd'},
@@ -104,7 +106,7 @@ static struct option  accuracy_long_options[] = {
     {0,0,0,0}
 };
 
-const char* accuracy_short_options = "b:a:m:v:S2us:r:e:q:k:cM:p:d:n:x:V:L:DA";
+const char* accuracy_short_options = "b:a:m:v:S2us:r:e:q:k:cM:p:d:n:x:V:L:DAC:";
 
 void accuracy_print_help()
 {
@@ -126,6 +128,7 @@ void accuracy_print_help()
   std::cerr<< "-a/--accuracy_stat,                    output reporting accuracy for each alignment [accuracy_stat.txt].\n";
   std::cerr<< "-e/--error_prof_out,                   Error profile output in plain txt format [error_prof_out.txt].\n";
   std::cerr<< "-k/--known_var_out,                    Output for known var. [known_var_out.txt].\n";
+  std::cerr<< "-C/--context_count,                    Output for trinucleotide and dinucleotide context context in the reference. [context_count.txt].\n";
   //std::cerr<< "--qscore_prof,                         Output qscore prof. First column is qscore cutoff; second column is number of bases in denominator\n";
   std::cerr<< "--detail_qscore_prof,                  Output finer scale qscore cutoffs, error rates profile. The default is only q0, q30 [false]. \n";
   std::cerr<< "--read_level_stat,                     Output read level error metrics.\n";
@@ -207,6 +210,9 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
       case 'k':
         opt.known_var_out = optarg;
         break;
+      case 'C':
+        opt.context_count = optarg;
+        break;
       case OPT_QSCORE_PROF:
         opt.detail_qscore_prof = true;
         break;
@@ -230,71 +236,20 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
   return 0;
 }
 
-struct ErrorStat {
-  int64_t neval = 0;
-  int64_t nerror = 0;
-  int64_t nerror_masked_by_vcf2 = 0;
-  int64_t discard_frag_counter = 0;
-  int64_t pair_counter = 0;
-  int64_t single_counter = 0;
-  vector<int> cutoffs;
-  vector<int64_t> R1_q0_cov;
-  vector<int64_t> R1_q30_cov;
-  vector<int64_t> R1_q0_error;
-  vector<int64_t> R1_q30_error;
-  vector<int64_t> R2_q0_cov;
-  vector<int64_t> R2_q30_cov;
-  vector<int64_t> R2_q0_error;
-  vector<int64_t> R2_q30_error;
-  vector<int64_t> base_counter;
-  vector<int64_t> triplet_counter;
-  vector<int64_t> doublet_counter;
-  //qscore cutoff -> read1, read2
-  std::map<int, std::pair<int64_t, int64_t>> qcut_neval;
-  std::map<int, std::pair<int64_t, int64_t>> qcut_nerrors;
 
-  //ErrorStat() = delete;
-  ErrorStat(int L) {
-    cutoffs = {0};
-    //cutoffs = {0, 30};
-    qcut_neval[0] = std::make_pair(0,0);
-    //qcut_neval[30] = std::make_pair(0,0);
-    qcut_nerrors[0] = std::make_pair(0,0);
-    //qcut_nerrors[30] = std::make_pair(0,0);
-    Init(L);
-  }
-  ErrorStat(const vector<int>& qcuts, int L): cutoffs(qcuts){
-    assert(std::find(qcuts.begin(), qcuts.end(), 0) != qcuts.end());
-    //assert(std::find(qcuts.begin(), qcuts.end(), 30) != qcuts.end());
-    for (auto q : qcuts) {
-      qcut_neval[q] = std::make_pair(0,0);
-      qcut_nerrors[q] = std::make_pair(0,0);
-    }
-    Init(L);
-  }
-
- private:
-  void Init(int L) {
-    R1_q0_cov.resize(L);
-    R1_q30_cov.resize(L);
-    R1_q0_error.resize(L);
-    R1_q30_error.resize(L);
-    R2_q0_cov.resize(L);
-    R2_q30_cov.resize(L);
-    R2_q0_error.resize(L);
-    R2_q30_error.resize(L);
-    base_counter.resize(4);
-  }
-};
-
-std::vector<int> NumEffBases(const cpputil::Segments& seg,
+std::pair<int,int> NumEffBases(const cpputil::Segments& seg,
     const SeqLib::GenomicRegion* const gr,
-    std::set<int> blacklist,
+    const SeqLib::RefGenome& ref,
+    const string& chrname,
+    const std::set<int>& blacklist,
+    cpputil::ErrorStat& es,
     int minbq,
+    bool count_context,
     bool count_overhang){
-  //return a vector of size 8. A,C,G,T count, first read1, then read2
-  std::vector<int> r1;
-  std::vector<int> r2;
+  // blacklist represents a set of SNV positions that will not be counted in the error rate calculation
+  int r1;
+  int r2;
+  std::set<int> baseqblack;
   if (seg.size() == 1) {
     std::pair<int,int> range;
     if (gr) {
@@ -304,10 +259,16 @@ std::vector<int> NumEffBases(const cpputil::Segments& seg,
       range.second = seg.front().AlignmentEndPosition();
     }
     if (seg.front().FirstFlag()) {
-      r1 = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, range.first, range.second);
+      if (count_context)
+        r1 = cpputil::CountValidBaseAndContextInMatchedBases(seg.front(), blacklist, chrname, ref, minbq, baseqblack, es, range.first, range.second);
+      else
+        r1 = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, baseqblack,range.first, range.second);
     }
     else {
-      r2 = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, range.first, range.second);
+      if (count_context)
+        r2 = cpputil::CountValidBaseAndContextInMatchedBases(seg.front(), blacklist, chrname, ref, minbq, baseqblack, es, range.first, range.second);
+      else
+        r2 = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, baseqblack, range.first, range.second);
     }
   } else {
     std::pair<int, int> overlap_front, overlap_back;
@@ -332,20 +293,32 @@ std::vector<int> NumEffBases(const cpputil::Segments& seg,
       range_back.second = std::min(range_back.second, overlap_back.second);
     }
     if (seg.front().FirstFlag()) {
-      r1 = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, range_front.first, range_front.second);
-      r2 = cpputil::CountValidBaseInMatchedBases(seg.back(), blacklist, minbq, range_back.first, range_back.second);
+      if (count_context) {
+        r1 = cpputil::CountValidBaseAndContextInMatchedBases(seg.front(), blacklist, chrname, ref, minbq, baseqblack, es, range_front.first, range_front.second);
+        r2 = cpputil::CountValidBaseAndContextInMatchedBases(seg.back(), blacklist, chrname, ref, minbq, baseqblack, es, range_back.first, range_back.second);
+      }
+      else {
+        r1 = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, baseqblack, range_front.first, range_front.second);
+        r2 = cpputil::CountValidBaseInMatchedBases(seg.back(), blacklist, minbq, baseqblack, range_back.first, range_back.second);
+
+      }
     } else {
-      r2 = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, range_front.first, range_front.second);
-      r1 = cpputil::CountValidBaseInMatchedBases(seg.back(), blacklist, minbq, range_back.first, range_back.second);
+      if (count_context) {
+        r2 = cpputil::CountValidBaseAndContextInMatchedBases(seg.front(), blacklist, chrname, ref, minbq, baseqblack, es, range_front.first, range_front.second);
+        r1 = cpputil::CountValidBaseAndContextInMatchedBases(seg.back(), blacklist, chrname, ref, minbq, baseqblack, es, range_back.first, range_back.second);
+      }
+      else {
+        r2 = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, baseqblack, range_front.first, range_front.second);
+        r1 = cpputil::CountValidBaseInMatchedBases(seg.back(), blacklist, minbq,  baseqblack, range_back.first, range_back.second);
+      }
     }
   }
-  r1.insert(r1.end(), r2.begin(), r2.end());
-  return r1;
+  return std::make_pair(r1, r2);
 }
 
 void CycleBaseCount(const cpputil::Segments& seg,
                     const SeqLib::GenomicRegion* const gr,
-                    ErrorStat& es) {
+                    cpputil::ErrorStat& es) {
   auto res = std::make_pair(0,0);
   if (seg.size() == 1) {
     std::pair<int,int> range;
@@ -403,7 +376,7 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
                     std::ofstream& ferr,
                     std::ofstream& known,
                     std::ofstream& readlevel,
-                    ErrorStat& errorstat) {
+                    cpputil::ErrorStat& errorstat) {
   for (auto seg : frag) { // a fragment may have multiple segs due to supplementary alignments
     if (seg.size() > 2) {
       throw std::runtime_error("seg size cannot be more than 2");
@@ -441,29 +414,26 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
     int r1_q30_den =0, r2_q30_den = 0;
     int r1_q0_nerror = 0, r2_q0_nerror = 0;
     int r1_q30_nerror = 0, r2_q30_nerror = 0;
-
+    string chrname = seg.front().ChrName(bamheader);
     for (int qcut : errorstat.cutoffs) {
-      auto res = NumEffBases(seg, gr, blacklist, qcut, opt.count_nonoverlap);
-      errorstat.qcut_neval[qcut].first += std::accumulate(res.begin(), res.begin() + 4, 0);
-      errorstat.qcut_neval[qcut].second += std::accumulate(res.begin() + 4, res.end(), 0);
+      auto res = NumEffBases(seg, gr, ref, chrname, blacklist, errorstat, qcut, false, opt.count_nonoverlap);
+      errorstat.qcut_neval[qcut].first += res.first;
+      errorstat.qcut_neval[qcut].second += res.second;
       if (!opt.read_level_stat.empty()) {
         if (qcut == 0) {
-          r1_q0_den = std::accumulate(res.begin(), res.begin() + 4, 0);
-          r2_q0_den = std::accumulate(res.begin() + 4, res.end(), 0);
+          r1_q0_den = res.first;
+          r2_q0_den = res.second;
         } else if (qcut == 30) {
-          r1_q30_den = std::accumulate(res.begin(), res.begin() + 4, 0);
-          r2_q30_den = std::accumulate(res.begin() + 4, res.end(), 0);
+          r1_q30_den = res.first;
+          r2_q30_den = res.second;
         }
       }
     }
 
     int num = 0;
     // get denominator
-    auto den = NumEffBases(seg, gr, blacklist, opt.bqual_min, opt.count_nonoverlap);
-    for (unsigned bi = 0; bi < 4; ++bi) {
-      errorstat.base_counter[bi] += (den[bi] + den[bi + 4]);
-    }
-    errorstat.neval += std::accumulate(den.begin(), den.end(), 0);
+    auto den = NumEffBases(seg, gr, ref, chrname, blacklist, errorstat, opt.bqual_min, true, opt.count_nonoverlap);
+    errorstat.neval += den.first + den.second;
     if (!opt.cycle_level_stat.empty()) {
       CycleBaseCount(seg, gr, errorstat);
     }
@@ -631,6 +601,7 @@ int codec_accuracy(int argc, char ** argv) {
   std::ofstream stat(opt.accuracy_stat);
   std::ofstream ferr(opt.error_prof_out);
   std::ofstream known(opt.known_var_out);
+  std::ofstream context(opt.context_count);
   std::ofstream readlevel;
   std::ofstream cyclelevel;
   string error_profile_header =
@@ -664,9 +635,9 @@ int codec_accuracy(int argc, char ** argv) {
     mafr.Open(opt.maf_file);
   }
   const int L = 250;
-  auto errorstat = ErrorStat(L);
+  auto errorstat = cpputil::ErrorStat(L);
   if (opt.detail_qscore_prof) {
-    errorstat = ErrorStat({0,10,20,30}, 250);
+    errorstat = cpputil::ErrorStat({0,10,20,30}, 250);
   }
 
   cpputil::TargetLayout tl(isf.bamheader(), opt.bed_file);
@@ -724,10 +695,10 @@ int codec_accuracy(int argc, char ** argv) {
   stat << cpputil::join(header, "\t") << std::endl;
   stat << opt.bqual_min << '\t'
        << errorstat.neval << '\t'
-      << errorstat.base_counter[0] << '\t'
-      << errorstat.base_counter[1] << '\t'
-      << errorstat.base_counter[2] << '\t'
-      << errorstat.base_counter[3] << '\t'
+      << errorstat.base_counter['A'] << '\t'
+      << errorstat.base_counter['C'] << '\t'
+      << errorstat.base_counter['G'] << '\t'
+      << errorstat.base_counter['T'] << '\t'
       << errorstat.nerror << '\t'
        << (float) errorstat.nerror / errorstat.neval << '\t'
        << errorstat.nerror_masked_by_vcf2 << '\t'
@@ -753,6 +724,14 @@ int codec_accuracy(int argc, char ** argv) {
     stat << (float) r2_num / r2_den;
     if (ii == errorstat.cutoffs.size())  stat << '\n';
     else stat << '\t';
+  }
+
+  for (const auto& it : errorstat.triplet_counter) {
+    context << it.first << "\t" << it.second << std::endl;
+  }
+
+  for (const auto& it : errorstat.doublet_counter) {
+    context << it.first << "\t" << it.second << std::endl;
   }
 
   if (!opt.cycle_level_stat.empty()) {
