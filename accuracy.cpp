@@ -61,7 +61,7 @@ struct AccuOptions {
   string sample = "";
   string reference;
   int fragend_dist_filter = 0;
-  string known_var_out = "known_var_out.txt";
+  string known_var_out;
   string context_count = "context_count.txt";
   bool detail_qscore_prof = false;
   string read_level_stat;
@@ -600,17 +600,19 @@ int codec_accuracy(int argc, char ** argv) {
   ref.LoadIndex(opt.reference);
   std::ofstream stat(opt.accuracy_stat);
   std::ofstream ferr(opt.error_prof_out);
-  std::ofstream known(opt.known_var_out);
   std::ofstream context(opt.context_count);
+  std::ofstream known;
   std::ofstream readlevel;
   std::ofstream cyclelevel;
   string error_profile_header =
       "chrom\tref_pos\tref\talt\ttype\tread_pos\tsnv_base_qual\tfirst_of_pair\tread_name";
   ferr << error_profile_header << std::endl;
-
-  string known_var_header =
-      "chrom\tref_pos\tref\talt\ttype\tread_pos\tsnv_base_qual\tfirst_of_pair\tread_name\tevidence";
-  known << known_var_header << std::endl;
+  if (not opt.known_var_out.empty()) {
+    known.open(opt.known_var_out);
+    string known_var_header =
+        "chrom\tref_pos\tref\talt\ttype\tread_pos\tsnv_base_qual\tfirst_of_pair\tread_name\tevidence";
+    known << known_var_header << std::endl;
+  }
   if (not opt.read_level_stat.empty()) {
     readlevel.open(opt.read_level_stat);
     string read_level_header =
