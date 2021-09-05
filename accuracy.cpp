@@ -55,8 +55,9 @@ struct AccuOptions {
   bool load_duplicate = false;
   bool all_mutant_frags = false;
   int max_nm_filter = MYINT_MAX;
-  int max_mismatch_filter = MYINT_MAX;
+  int max_nonNedit_filter = MYINT_MAX;
   int verbose = 0;
+  double max_mismatch_frac = 1.0;
   vector<string> vcfs;
   string sample = "";
   string reference;
@@ -90,14 +91,14 @@ static struct option  accuracy_long_options[] = {
     {"reference",                required_argument,      0,        'r'},
     {"error_prof_out",           required_argument,      0,        'e'},
     {"bqual_min",                required_argument,      0,        'q'},
-    //{"min_frac_bqual_pass",      required_argument,      0,        'F'},
+    {"max_mismatch_frac",        required_argument,      0,        'F'},
     {"known_var_out",            required_argument,      0,        'k'},
     {"context_count",            required_argument,      0,        'C'},
     {"pair_min_overlap",         required_argument,      0,        'p'},
     {"count_nonoverlap",         no_argument,            0,        'c'},
     {"fragend_dist_filter",      required_argument,      0,        'd'},
     {"max_nm_filter",            required_argument,      0,        'n'},
-    {"max_mismatch_filter",      required_argument,      0,        'x'},
+    {"max_nonNedit_filter",      required_argument,      0,        'x'},
     {"verbose",                  required_argument,      0,        'v'},
     {"all_mutant_frags",         no_argument,             0,        'A'},
     {"detail_qscore_prof",       no_argument,            0,        OPT_QSCORE_PROF},
@@ -106,7 +107,7 @@ static struct option  accuracy_long_options[] = {
     {0,0,0,0}
 };
 
-const char* accuracy_short_options = "b:a:m:v:S2us:r:e:q:k:cM:p:d:n:x:V:L:DAC:";
+const char* accuracy_short_options = "b:a:m:v:S2us:r:e:q:k:cM:p:d:n:x:V:L:DAC:F:";
 
 void accuracy_print_help()
 {
@@ -138,7 +139,7 @@ void accuracy_print_help()
   std::cerr<< "-n/--max_edit_filter,                  Skip a read if its NM tag is larger than this value [INT_MAX].\n";
   std::cerr<< "-x/--max_nonNedit_filter,              Skip a read if the number of non-N bases edits is larger than this value [INT_MAX].\n";
   std::cerr<< "-d/--fragend_dist_filter,              Consider a variant if its distance to the fragment end is at least this value [0].\n";
-  //std::cerr<< "-F/--min_frac_bqual_pass,              If bqual_min is none 0. The number of bases passing bqual filter has to be larger than or equal to this frac [0.1].\n";
+  std::cerr<< "-F/--max_mismatch_frac,                Filter out a read if its mismatch fraction is larger than this value  [1.0].\n";
   std::cerr<< "-p/--pair_min_overlap,                 When using selector, the minimum overlap between the two ends of the pair. -1 for complete overlap, 0 no overlap required [0].\n";
   std::cerr<< "-c/--count_nonoverlap,                 Count overhang (non overlapping) region of a read pair. Default [false].\n";
   std::cerr<< "-A/--all_mutant_frags,                  Output all mutant fragments even if failed by concordant or qscore filters Default [false].\n";
@@ -173,10 +174,13 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
         opt.max_nm_filter = atoi(optarg);
         break;
       case 'x':
-        opt.max_mismatch_filter = atoi(optarg);
+        opt.max_nonNedit_filter = atoi(optarg);
         break;
       case 'd':
         opt.fragend_dist_filter = atoi(optarg);
+        break;
+      case 'F':
+        opt.max_mismatch_frac = atof(optarg);
         break;
       case 'S':
         opt.load_supplementary = true;
@@ -247,28 +251,29 @@ std::pair<int,int> NumEffBases(const cpputil::Segments& seg,
     bool count_context,
     bool count_overhang){
   // blacklist represents a set of SNV positions that will not be counted in the error rate calculation
-  int r1;
-  int r2;
+  int r1 = 0;
+  int r2 = 0;
   std::set<int> baseqblack;
   if (seg.size() == 1) {
     std::pair<int,int> range;
+    const auto& br = seg.front();
     if (gr) {
-      range = cpputil::GetBamOverlapQStartAndQStop(seg.front(), *gr);
+      range = cpputil::GetBamOverlapQStartAndQStop(br, *gr);
     } else {
-      range.first = seg.front().AlignmentPosition();
-      range.second = seg.front().AlignmentEndPosition();
+      range.first = br.AlignmentPosition();
+      range.second = br.AlignmentEndPosition();
     }
-    if (seg.front().FirstFlag()) {
+    if (not br.PairedFlag() or br.FirstFlag()) {
       if (count_context)
-        r1 = cpputil::CountValidBaseAndContextInMatchedBases(seg.front(), blacklist, chrname, ref, minbq, baseqblack, es, range.first, range.second);
+        r1 = cpputil::CountValidBaseAndContextInMatchedBases(br, blacklist, chrname, ref, minbq, baseqblack, es, range.first, range.second);
       else
-        r1 = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, baseqblack,range.first, range.second);
+        r1 = cpputil::CountValidBaseInMatchedBases(br, blacklist, minbq, baseqblack,range.first, range.second);
     }
     else {
       if (count_context)
-        r2 = cpputil::CountValidBaseAndContextInMatchedBases(seg.front(), blacklist, chrname, ref, minbq, baseqblack, es, range.first, range.second);
+        r2 = cpputil::CountValidBaseAndContextInMatchedBases(br, blacklist, chrname, ref, minbq, baseqblack, es, range.first, range.second);
       else
-        r2 = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, baseqblack, range.first, range.second);
+        r2 = cpputil::CountValidBaseInMatchedBases(br, blacklist, minbq, baseqblack, range.first, range.second);
     }
   } else {
     std::pair<int, int> overlap_front, overlap_back;
@@ -379,6 +384,9 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
                     cpputil::ErrorStat& errorstat) {
   for (auto seg : frag) { // a fragment may have multiple segs due to supplementary alignments
     if (seg.size() > 2) {
+      for (s : seg) {
+        std::cerr << s << std::endl;
+      }
       throw std::runtime_error("seg size cannot be more than 2");
     }
   //          if (seg.size() == 2 && seg.front().ReverseFlag()) { // put forward read first
@@ -388,12 +396,18 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
     bool keep = true;
     for (const auto &s: seg) {
       //filtering reads before masking because the eof filtering will not update NM tag
-      if ( cpputil::GetNM(s) - cpputil::CountNBasesInAlignment(s) > opt.max_mismatch_filter ||
-          cpputil::GetNM(s) > opt.max_nm_filter) {
-        if (opt.verbose) {
-          std::cerr << "Discard read by edit distance filter " << s.Qname() <<"\n";
+      int nm = cpputil::GetNM(s);
+      if (nm == -1 and opt.max_mismatch_frac < 1.0) {
+        if (cpputil::GetNMismatch(s) > cpputil::GetNumNonIndelAlignedBases(s) * opt.max_mismatch_frac)
+          keep = false;
+      }
+      else {
+        if (nm > opt.max_nm_filter || nm - cpputil::CountNBasesInAlignment(s) > opt.max_nonNedit_filter) {
+          if (opt.verbose) {
+            std::cerr << "Discard read by edit distance filter " << s.Qname() <<"\n";
+          }
+          keep = false;
         }
-        keep = false;
       }
     }
     if (not keep) {
@@ -465,25 +479,25 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
 
     // Currenlty, always assume the variants are concordance between R1 and R2
     //TODO: if count_nonoverlap == true, allow single variants in the overhang regions.
-    std::vector<std::vector<cpputil::Variant>> quality_masked;
-    quality_masked.reserve(var_vars.size());
+    std::vector<std::vector<cpputil::Variant>> refined_vars;
+    refined_vars.reserve(var_vars.size());
     //Consolidate SNPs which has too purposes:
     // 1. change the variant quality of both reads to the lowest one so that they can be filtered of keep as a whole
     // 2. break doublets and etc. if not all bases are satisfying baseq cutoff.
     for (const auto& it: var_vars) {
       if (it.first.isIndel()) {
-        quality_masked.push_back(it.second);
+        refined_vars.push_back(it.second);
         continue;
       }
       if(it.second.size() == 1) {
-        quality_masked.push_back(it.second);
+        refined_vars.push_back(it.second);
       } else {
         auto vars = cpputil::snppair_consolidate(it.second[0], it.second[1], opt.bqual_min);
-        quality_masked.insert(quality_masked.end(), vars.begin(), vars.end());
+        refined_vars.insert(refined_vars.end(), vars.begin(), vars.end());
       }
     }
-    for (const auto& readpair: quality_masked) {
-      for (const auto& var : readpair) {
+    for (const auto& readpair_var: refined_vars) {
+      for (const auto& var : readpair_var) {
         vector<bool> real_muts;
         bool found;
         if (var.Type() == "SNV") {
@@ -503,17 +517,17 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
         }
         if (not found) { // error site
           int nerr = n_false_mut(real_muts);
-          if (var.Type() == "SNV" && var.var_qual >= opt.bqual_min && readpair.size() == 2) {
+          if (var.Type() == "SNV" && var.var_qual >= opt.bqual_min && (seg.size() == 1 || readpair_var.size() == 2)) {
             num += nerr;
           }
-          // detail error profiles
+          // mutant_families.txt
           if (n_true_mut(real_muts) > 0) { // partially match
             auto avars = cpputil::var_atomize(var);
             for (unsigned ai = 0; ai < real_muts.size(); ++ai) {
               if (not real_muts[ai]) {
                 if (opt.all_mutant_frags) ferr << avars[ai] << '\n';
                 else {
-                  if (avars[ai].var_qual >= opt.bqual_min && readpair.size() == 2)
+                  if (avars[ai].var_qual >= opt.bqual_min && (seg.size() == 1 || readpair_var.size() == 2))
                     ferr << avars[ai] << '\n';
                 }
               }
@@ -521,7 +535,7 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
           } else {
             if (opt.all_mutant_frags) ferr << var << '\n';
             else {
-              if ((var.isIndel() || var.var_qual >= opt.bqual_min) && readpair.size() == 2)
+              if ((var.isIndel() || var.var_qual >= opt.bqual_min) && (seg.size() == 1 || readpair_var.size() == 2))
                 ferr << var << '\n';
             }
           }
@@ -655,9 +669,6 @@ int codec_accuracy(int argc, char ** argv) {
     if (isf.ReadByRegion(cpputil::ArePEAlignmentOverlapAtLeastK, gr, chunk, opt.pair_min_overlap, "", opt.load_unpair)) {
       std::set<int32_t> blacklist;
       if (bcf_reader.IsOpen()) {
-        bcf_reader.vcf_to_blacklist_snv(gr, isf.bamheader(), blacklist);
-      }
-      if (bcf_reader2.IsOpen()) {
         bcf_reader.vcf_to_blacklist_snv(gr, isf.bamheader(), blacklist);
       }
       for (auto frag : chunk) {
