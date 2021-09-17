@@ -499,7 +499,7 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
     for (const auto& readpair_var: refined_vars) {
       for (const auto& var : readpair_var) {
         vector<bool> real_muts;
-        bool found;
+        bool found = false;
         if (var.Type() == "SNV") {
           real_muts.resize(var.alt_seq.size(), false);
         }
@@ -544,6 +544,8 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
           if (var.Type() == "SNV") {
             for (int qcut : errorstat.cutoffs) {
               if (var.var_qual >= qcut) {
+                //if duplicate fragments are merged after paired consensus, a pair of bases can be different.
+                //In this case, we are not filtering discordant pair.
                 if (var.first_of_pair) {
                   errorstat.qcut_nerrors[qcut].first += nerr;
                 } else {
