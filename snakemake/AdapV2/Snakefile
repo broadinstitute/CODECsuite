@@ -22,6 +22,7 @@ TRIM=f"{CODEC_root}/cmake-build-release/codec trim"
 CONSENSUS_BIN=f"{CODEC_root}/cmake-build-release/codec consensus"
 ACCU_BIN=f"{CODEC_root}/cmake-build-release/codec accuracy"
 AGG_METRICS_SCRIPT=f"{CODEC_root}/snakemake/script/cds_summarize.py"
+AGG_LOG_SCRIPT=f"{CODEC_root}/snakemake/script/agg_log.py"
 SPLIT_SCRIPT=f"{CODEC_root}/snakemake/script/fastqsplit.pl"
 MONOMER_ERROR_SCRIPT = f"{CODEC_root}/snakemake/script/calculate_monomer_error_rate.py"
 
@@ -49,7 +50,7 @@ rule SplitFastq1:
           nsplit = nparallel,
           prefix = "tmp/{id}_split_r1"
     output:
-          tmp = "tmp/{id}.1.fastq",
+          tmp = temp("tmp/{id}.1.fastq"),
           splitbed = temp(expand("tmp/{{id}}_split_r1.{ss}.fastq", ss = SPLITS)),
     shell:
          """
@@ -75,13 +76,15 @@ rule Demux:
          read1 = "tmp/{batch_id}_split_r1.{ss}.fastq",
          read2 = "tmp/{batch_id}_split_r2.{ss}.fastq",
     output:
-         read1 = expand("demux/{{batch_id}}_split.{{ss}}.{index}.1.fastq.gz", index = sample_names),
-         read2 = expand("demux/{{batch_id}}_split.{{ss}}.{index}.2.fastq.gz", index = sample_names),
+         read1 = temp(expand("demux/{{batch_id}}_split.{{ss}}.{index}.1.fastq.gz", index = sample_names)),
+         read2 = temp(expand("demux/{{batch_id}}_split.{{ss}}.{index}.2.fastq.gz", index = sample_names)),
          unmatched1 = temp("demux/{batch_id}_split.{ss}.unmatched.1.fastq.gz"),
          unmatched2 = temp("demux/{batch_id}_split.{ss}.unmatched.2.fastq.gz"),
          hopped1 = temp("demux/{batch_id}_split.{ss}.hopped.1.fastq.gz"),
          hopped2 = temp("demux/{batch_id}_split.{ss}.hopped.2.fastq.gz"),
          log = "demux/{batch_id}_split.{ss}.log",
+    wildcard_constraints:
+          ss = "[0-9]+"
     params:
         sample_sheet = config['sample_sheet'],
         outprefix = "demux/{batch_id}_split.{ss}",
@@ -104,7 +107,7 @@ rule Trim:
         trimone = temp("adap_trimmed/{batch_id}_split.{ss}.{index}.trimone.bam"),
         untrimboth = temp("adap_trimmed/{batch_id}_split.{ss}.{index}.untrimboth.bam"),
         lost = temp("adap_trimmed/{batch_id}_split.{ss}.{index}.lost.bam"),
-        log = "adap_trimmed/{batch_id}_split.{ss}.{index}.trim.log",
+        log = temp("adap_trimmed/{batch_id}_split.{ss}.{index}.trim.log"),
     params:
         adap_type = "custom_primer_v2",
         outprefix = "adap_trimmed/{batch_id}_split.{ss}.{index}",
@@ -112,7 +115,8 @@ rule Trim:
     resources:
         mem = 4,
     wildcard_constraints:
-        index = "[0-9a-zA-Z_]+"
+        index = "[0-9a-zA-Z_-]+",
+        ss = "[0-9]+"
     shell:
         """
             {TRIM} -1 {input.read1} -2 {input.read2} -o  {params.outprefix} -u 3 -U 3 -f 2 -t 2 -s {params.rgsm} > {output.log} 
@@ -127,7 +131,7 @@ rule SortInQueryOrder:
         mem = 16,
         runtime = 2,
     wildcard_constraints:
-        index = "[0-9a-zA-Z_]+"
+        index = "[0-9a-zA-Z_-]+"
     shell:
         """
         {PICARD} SortSam I={input} O={output} SO=queryname TMP_DIR={tmpdir}
@@ -150,7 +154,7 @@ rule AlignRawTrimmed:
              ncores = config['ncores'],
              runtime = 4
     wildcard_constraints:
-          index = "[0-9a-zA-Z_]+"
+          index = "[0-9a-zA-Z_-]+"
     shell:
          """
          {PICARD} SamToFastq \
@@ -173,21 +177,6 @@ rule AlignRawTrimmed:
              MAX_RECORDS_IN_RAM=200000
          """
 
-rule CDSByProduct:
-    input:
-         trim_log = ADAPTER_TRIM_OUT + "/{batch_id}_split.{ss}.{index}.trim.log",
-         highconf_bam = "tmp/{batch_id}_split.{ss}.{index}.highconf.aligned.bam",
-    params:
-          sid = "{batch_id}"
-    output:
-          met = Metrics_OUT + "/byproduct/{batch_id}_split.{ss}.{index}.byproduct.txt"
-    wildcard_constraints:
-          index = "[0-9a-zA-Z_]+"
-    shell:
-         """
-            {AGG_METRICS_SCRIPT} --sample_id {params.sid} --trim_log {input.trim_log} \
-            --highconf_bam {input.highconf_bam} > {output.met}
-         """
 
 rule MergeSplit:
     input:
@@ -199,22 +188,58 @@ rule MergeSplit:
     resources:
           mem = 4,
           ncores = config['ncores']
-    wildcard_constraints:
-          index = "[0-9a-zA-Z_]+"
     shell:
          """
          samtools merge -@ {resources.ncores} {output.bam} {input.bam} && samtools index {output.bam} -@ {resources.ncores}
+         """
+
+rule MergeLogSplit:
+    input:
+         expand(ADAPTER_TRIM_OUT + "/{{batch_id}}_split.{ss}.{{index}}.trim.log", ss=SPLITS),
+    output:
+         ADAPTER_TRIM_OUT + "/{batch_id}.{index}.trim.log"
+    wildcard_constraints:
+          batch_id = "[0-9a-zA-Z_-]+",
+          index = "[0-9a-zA-Z_-]+"
+    resources:
+          mem = 8,
+          ncores = 1
+    shell:
+         """
+          {AGG_LOG_SCRIPT} {input} {output}
+         """
+
+rule CDSByProduct:
+    input:
+         trim_log = ADAPTER_TRIM_OUT + "/{batch_id}.{index}.trim.log",
+         highconf_bam = "tmp/{batch_id}.{index}.raw.aligned.bam",
+         highconf_bai = "tmp/{batch_id}.{index}.raw.aligned.bam.bai"
+    output:
+          met = Metrics_OUT + "/byproduct/{batch_id}.{index}.byproduct.txt"
+    params:
+          sid = "{index}"
+    wildcard_constraints:
+          index = "[0-9a-zA-Z_-]+"
+    resources:
+        mem = 24,
+        runtime = 12,
+    shell:
+         """
+            {AGG_METRICS_SCRIPT} --sample_id {params.sid} --trim_log {input.trim_log} \
+            --highconf_bam {input.highconf_bam} > {output.met}
          """
 
 rule MergeRawGroup:
     input:
          lambda wildcard: expand("tmp/{batch_id}.{{index}}.raw.aligned.bam", batch_id = batch_ids)
     output:
-          bam = temp("tmp/{index}.merged.raw.aligned.bam")
+          bam = temp("tmp/{index}.raw.aligned.bam")
     resources:
              mem = 8,
              ncores = config['ncores'],
              runtime = 16,
+    wildcard_constraints:
+        index = "[0-9a-zA-Z_-]+"
     shell:
          """
          samtools merge -@ {resources.ncores} {output.bam} {input}
@@ -222,10 +247,10 @@ rule MergeRawGroup:
 
 rule ReplaceRawReadGroup:
     input:
-       "tmp/{index}.merged.raw.aligned.bam"
+       "tmp/{index}.raw.aligned.bam"
     output:
-       bam = temp("tmp/{index}.merged.raw.replacerg.bam"),
-       bai = temp("tmp/{index}.merged.raw.replacerg.bai"),
+       bam = temp("tmp/{index}.raw.replacerg.bam"),
+       bai = temp("tmp/{index}.raw.replacerg.bai"),
     params:
         sid = "{index}"
     resources:
@@ -246,12 +271,12 @@ rule ReplaceRawReadGroup:
 
 rule MarkRawDuplicates:
     input:
-        bam = "tmp/{index}.merged.raw.replacerg.bam"
+        bam = "tmp/{index}.raw.replacerg.bam"
     resources:
         mem = 32,
         runtime = 16,
     output:
-        bam = "tmp/{index}.merged.raw.replacerg.markdup.bam",
+        bam = "tmp/{index}.raw.replacerg.markdup.bam",
         met = "metrics/{index}.raw.marked_duplicates.txt"
     shell:
         """
@@ -259,3 +284,13 @@ rule MarkRawDuplicates:
             TAG_DUPLICATE_SET_MEMBERS=true TAGGING_POLICY=All PG=null BARCODE_TAG=RX DUPLEX_UMI=true
         """
 
+rule CollectInsertSizeMetrics:
+    input:
+         bam = "tmp/{index}.raw.replacerg.markdup.bam",
+    output:
+          txt = Metrics_OUT + "/{index}.raw.insert_size_metrics.txt",
+          hist = Metrics_OUT + "/{index}.raw.insert_size_histogram.pdf"
+    shell:
+         """
+         {PICARD} CollectInsertSizeMetrics I={input.bam} O={output.txt} H={output.hist} M=0.5 W=600 DEVIATIONS=100
+         """

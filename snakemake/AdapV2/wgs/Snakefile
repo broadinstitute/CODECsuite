@@ -6,15 +6,17 @@ EVAL_REGION_IL= config['region_interval_list']
 rule all:
     input:
          #expand(ACCU_OUT + "/{stype}/{batch_id}.{index}.error_metrics.txt", batch_id = batch_ids, index = sample_names, stype = ["consensus"]),
-         expand("consensus/{index}.merged.cds_consensus.mol_consensus.aligned.bam", index = sample_names),
-         expand(Metrics_OUT + "/{index}.merged.{type}.wgs_metrics.txt",index = sample_names, type=['cds_consensus', 'raw']),
-         expand("groupbyumi/{index}.merged.cds_consensus.GroupedByUmi.bam",index = sample_names)
+         expand(Metrics_OUT + "/{index}.raw.insert_size_metrics.txt",index = sample_names),
+         expand(Metrics_OUT + "/byproduct/{batch_id}.{index}.byproduct.txt", batch_id = batch_ids, index = sample_names),
+         expand("consensus/{index}.cds_consensus.mol_consensus.aligned.bam", index = sample_names),
+         expand(Metrics_OUT + "/{index}.{type}.wgs_metrics.txt",index = sample_names, type=['cds_consensus', 'raw']),
+         expand("groupbyumi/{index}.cds_consensus.GroupedByUmi.bam",index = sample_names)
 
 rule CollectRawWgsMetrics:
     input:
-         bam = "tmp/{index}.merged.raw.replacerg.markdup.bam",
+         bam = "tmp/{index}.raw.replacerg.markdup.bam",
     output:
-          metrics = Metrics_OUT + "/{index}.merged.raw.wgs_metrics.txt",
+          metrics = Metrics_OUT + "/{index}.raw.wgs_metrics.txt",
     params:
           ref = REF,
           itl = EVAL_REGION_IL
@@ -25,28 +27,31 @@ rule CollectRawWgsMetrics:
 
 rule DuplexConsensus:
     input:
-         "tmp/{sample_id}.{index}.raw.aligned.bam",
+         "tmp/{index}.raw.replacerg.markdup.bam",
     output:
-         tmp =  temp("tmp/{sample_id}.{index}.consensus.tmp.bam"),
-         bam = "consensus/{sample_id}.{index}.consensus.bam"
+         tmp =  temp("tmp/{index}.consensus.tmp.bam"),
+         bam = temp("consensus/{index}.consensus.bam")
+    params:
+         tmpdir = "tmp"
     resources:
-         mem = 16,
-         runtime = 16
+         mem = 8,
+         runtime = 32,
+         ncores = config['ncores']
     shell:
          """
-         {CONSENSUS_BIN} -b {input} -o {output.tmp} -m 0 -C -q 0 -p 1 &&
+         {CONSENSUS_BIN} -b {input} -o {output.tmp} -m 0 -C -q 0 -p 1 -d {params.tmpdir} -T {resources.ncores} &&
          {PICARD} SortSam I={output.tmp} O={output.bam} SO=queryname
          """
 
 rule AlignConsensus:
     input:
-         "consensus/{sample_id}.{index}.consensus.bam"
+         "consensus/{index}.consensus.bam"
     output:
-          fastq1 = temp("tmp/{sample_id}.{index}.1.fq"),
-          fastq2 = temp("tmp/{sample_id}.{index}.2.fq"),
-          tmp = temp("tmp/{sample_id}.{index}.aligned_tmp.bam"),
-          bam = temp("consensus/{sample_id}.{index}.consensus.aligned.bam"),
-          bai = temp("consensus/{sample_id}.{index}.consensus.aligned.bai")
+          fastq1 = temp("tmp/{index}.1.fq"),
+          fastq2 = temp("tmp/{index}.2.fq"),
+          tmp = temp("tmp/{index}.aligned_tmp.bam"),
+          bam = temp("consensus/{index}.cds_consensus.replacerg.bam"),
+          bai = temp("consensus/{index}.cds_consensus.replacerg.bai")
     params:
           reference = REF,
     resources:
@@ -74,63 +79,63 @@ rule AlignConsensus:
              MAX_RECORDS_IN_RAM=5000000
          """
 
-rule RawErrorMetrics:
-    input:
-         bam = "tmp/{sample_id}.{index}.raw.aligned.bam",
-    output:
-          accu = ACCU_OUT + "/raw/{sample_id}.{index}.error_metrics.txt",
-          error = ACCU_OUT + "/raw/{sample_id}.{index}.mutant_families.txt",
-          known = ACCU_OUT + "/raw/{sample_id}.{index}.known_var.txt",
-          readlevel = ACCU_OUT + "/raw/{sample_id}.{index}.readlevel.txt",
-    params:
-          ref = REF,
-          mapq = 60,
-          baseq = 0,
-          high_conf_region = EAVL_REGION_BED,
-          germ_vcf = TRUTH_BCF,
-          vcf_sid = "HG001"
-    resources:
-             mem = 8,
-             runtime = 96
-    shell:
-         """
-            {ACCU_BIN}  -b {input.bam} \
-                -L {params.high_conf_region} \
-                -m {params.mapq} \
-                -r {params.ref} \
-                -V {params.germ_vcf} \
-                -s {params.vcf_sid} \
-                -p 50 \
-                -O \
-                -q {params.baseq} \
-                -a {output.accu} \
-                -e {output.error} \
-                -k {output.known} \
-                --read_level_stat {output.readlevel}
-         """
+# rule RawErrorMetrics:
+#     input:
+#          bam = "tmp/{sample_id}.{index}.raw.aligned.bam",
+#     output:
+#           accu = ACCU_OUT + "/raw/{sample_id}.{index}.error_metrics.txt",
+#           error = ACCU_OUT + "/raw/{sample_id}.{index}.mutant_families.txt",
+#           known = ACCU_OUT + "/raw/{sample_id}.{index}.known_var.txt",
+#           readlevel = ACCU_OUT + "/raw/{sample_id}.{index}.readlevel.txt",
+#     params:
+#           ref = REF,
+#           mapq = 60,
+#           baseq = 0,
+#           high_conf_region = EAVL_REGION_BED,
+#           germ_vcf = TRUTH_BCF,
+#           vcf_sid = "HG001"
+#     resources:
+#              mem = 8,
+#              runtime = 96
+#     shell:
+#          """
+#             {ACCU_BIN}  -b {input.bam} \
+#                 -L {params.high_conf_region} \
+#                 -m {params.mapq} \
+#                 -r {params.ref} \
+#                 -V {params.germ_vcf} \
+#                 -s {params.vcf_sid} \
+#                 -p 50 \
+#                 -O \
+#                 -q {params.baseq} \
+#                 -a {output.accu} \
+#                 -e {output.error} \
+#                 -k {output.known} \
+#                 --read_level_stat {output.readlevel}
+#          """
 
 
 #group_to_samples = metadata.reset_index().groupby('group_id').sample.agg(list)
 #print(group_to_samples)
-rule MergeGroupConsensus:
-    input:
-         lambda wildcard: expand("consensus/{id}.{{index}}.consensus.aligned.bam", id = batch_ids)
-    output:
-          bam = temp("consensus/{index}.merged.cds_consensus.aligned.bam")
-    resources:
-             mem = 8,
-             ncores = config['ncores'],
-             runtime = 16,
-    shell:
-         """
-         samtools merge -@ {resources.ncores} {output.bam} {input}
-         """
+# rule MergeGroupConsensus:
+#     input:
+#          lambda wildcard: expand("consensus/{id}.{{index}}.consensus.aligned.bam", id = batch_ids)
+#     output:
+#           bam = temp("consensus/{index}.cds_consensus.aligned.bam")
+#     resources:
+#              mem = 8,
+#              ncores = config['ncores'],
+#              runtime = 16,
+#     shell:
+#          """
+#          samtools merge -@ {resources.ncores} {output.bam} {input}
+#          """
 
 # rule MergeAll:
 #     input:
-#          expand("consensus/{index}.merged.cds_consensus.aligned.bam", index=metadata.index.unique())
+#          expand("consensus/{index}.cds_consensus.aligned.bam", index=metadata.index.unique())
 #     output:
-#          bam = temp("consensus/{all}.merged.cds_consensus.tmp.bam")
+#          bam = temp("consensus/{all}.cds_consensus.tmp.bam")
 #     resources:
 #              mem = 8,
 #              ncores = config['ncores'],
@@ -140,38 +145,15 @@ rule MergeGroupConsensus:
 #          samtools merge -@ {resources.ncores} {output.bam} {input} && samtools index {output.bam}
 #          """
 
-rule ReplaceReadGroup:
-    input:
-       "consensus/{index}.merged.cds_consensus.aligned.bam"
-    output:
-       bam = temp("consensus/{index}.merged.cds_consensus.replacerg.bam"),
-       bai = temp("consensus/{index}.merged.cds_consensus.replacerg.bai"),
-    params:
-        sid = "{index}"
-    resources:
-        mem = 24,
-        runtime = 16,
-    shell:
-        """
-        {PICARD} AddOrReplaceReadGroups \
-           I={input} \
-           O={output.bam} \
-           CREATE_INDEX=true \
-           RGID=4 \
-           RGLB=lib1 \
-           RGPL=ILLUMINA \
-           RGPU=unit1 \
-           RGSM={params.sid}
-        """
 
 rule MarkDuplicates:
     input:
-        bam = "consensus/{index}.merged.cds_consensus.replacerg.bam"
+        bam = "consensus/{index}.cds_consensus.replacerg.bam"
     resources:
         mem = 32,
         runtime = 16,
     output:
-        bam = "consensus/{index}.merged.cds_consensus.replacerg.markdup.bam",
+        bam = "consensus/{index}.cds_consensus.replacerg.markdup.bam",
         met = "metrics/{index}.marked_duplicates.txt"
     shell:
         """
@@ -181,10 +163,10 @@ rule MarkDuplicates:
 
 rule GroupReadByUMI:
     input:
-         "consensus/{index}.merged.cds_consensus.replacerg.bam",
+         "consensus/{index}.cds_consensus.replacerg.bam",
     output:
-         bam = "groupbyumi/{index}.merged.cds_consensus.GroupedByUmi.bam",
-         histogram = Metrics_OUT + "/{index}.merged.cds_consensus.umiHistogram.txt"
+         bam = "groupbyumi/{index}.cds_consensus.GroupedByUmi.bam",
+         histogram = Metrics_OUT + "/{index}.cds_consensus.umiHistogram.txt"
     resources:
              mem = 16,
              runtime = 32
@@ -199,9 +181,9 @@ rule GroupReadByUMI:
 
 rule CallMolecularConsensusReads:
     input:
-         "groupbyumi/{index}.merged.cds_consensus.GroupedByUmi.bam",
+         "groupbyumi/{index}.cds_consensus.GroupedByUmi.bam",
     output:
-         temp("tmp/{index}.merged.cds_consensus.mol_consensus.bam")
+         temp("tmp/{index}.cds_consensus.mol_consensus.bam")
     params:
           rg = "{index}"
     resources:
@@ -219,13 +201,13 @@ rule CallMolecularConsensusReads:
 
 rule AlignMolecularConsensusReads:
     input:
-         "tmp/{index}.merged.cds_consensus.mol_consensus.bam"
+         "tmp/{index}.cds_consensus.mol_consensus.bam"
     output:
           fastq1 = temp("tmp/{index}_1.fq"),
           fastq2 = temp("tmp/{index}_2.fq"),
           tmp = temp("tmp/{index}.mol_consensus.aligned_tmp.bam"),
-          bam = "consensus/{index}.merged.cds_consensus.mol_consensus.aligned.bam",
-          bai = "consensus/{index}.merged.cds_consensus.mol_consensus.aligned.bai"
+          bam = "consensus/{index}.cds_consensus.mol_consensus.aligned.bam",
+          bai = "consensus/{index}.cds_consensus.mol_consensus.aligned.bai"
     params:
           reference = REF,
     resources:
@@ -257,9 +239,9 @@ rule AlignMolecularConsensusReads:
 
 rule CollectWgsMetrics:
     input:
-         bam = "consensus/{index}.merged.cds_consensus.replacerg.markdup.bam",
+         bam = "consensus/{index}.cds_consensus.replacerg.markdup.bam",
     output:
-          metrics = Metrics_OUT + "/{index}.merged.cds_consensus.wgs_metrics.txt",
+          metrics = Metrics_OUT + "/{index}.cds_consensus.wgs_metrics.txt",
     params:
           ref = REF,
           itl = EVAL_REGION_IL
@@ -270,7 +252,7 @@ rule CollectWgsMetrics:
 
 rule CDSErrorMetrics:
     input:
-         bam = "consensus/{index}.merged.cds_consensus.mol_consensus.aligned.bam",
+         bam = "consensus/{index}.cds_consensus.mol_consensus.aligned.bam",
     output:
           accu = ACCU_OUT + "/consensus/{index}.error_metrics.txt",
           error = ACCU_OUT + "/consensus/{index}.mutant_families.txt",
