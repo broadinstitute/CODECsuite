@@ -435,13 +435,12 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
     // various fragment level filters
     string chrname = seg.front().ChrName(bamheader);
     auto queryresult = cpputil::GetPairOverlapQStartAndQStop(seg.front(), seg.back());
-    std::pair<int,int> nums;
-    if (opt.min_passQ_frac > 0) {
-      std::set<int> bl;
-      nums = NumEffBases(seg, NULL, ref, chrname, bl, errorstat, opt.bqual_min, false, opt.count_nonoverlap, true);
-    }
     for (const auto &s: seg) {
       //filtering reads before masking because the eof filtering will not update NM tag
+      if (s.NumMatchBases() < 10) {
+        keep = false;
+        break;
+      }
       if (opt.filter_5endclip && cpputil::NumSoftClip5End(s) > 0) {
           keep = false;
           ++errorstat.n_filtered_sclip;
@@ -471,16 +470,6 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
         keep = false;
         break;
       }
-      if (opt.min_passQ_frac > 0 && s.FirstFlag() && (float) nums.first < olen * opt.min_passQ_frac) {
-        ++errorstat.n_filtered_q30rate;
-        keep = false;
-        break;
-      }
-      if (opt.min_passQ_frac > 0 && not s.FirstFlag() && (float) nums.second < olen * opt.min_passQ_frac) {
-        ++errorstat.n_filtered_q30rate;
-        keep = false;
-        break;
-      }
       if (nm == -1) { // if NM tag not exist, assume cigar is in new version, e.g., "X,="
         if (cpputil::GetNMismatch(s) > cpputil::GetNumNonIndelAlignedBases(s) * opt.max_mismatch_frac) {
           ++errorstat.n_filtered_edit;
@@ -499,6 +488,12 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
       }
     }
 
+    auto qpass = NumEffBases(seg,nullptr, ref, chrname, blacklist, errorstat, opt.bqual_min, false, opt.count_nonoverlap, true);
+    if (qpass.first < olen * opt.min_passQ_frac | qpass.second < olen * opt.min_passQ_frac) {
+      ++errorstat.n_filtered_q30rate;
+      keep = false;
+    }
+
     if (not keep) {
       ++errorstat.discard_frag_counter;
       continue;
@@ -515,26 +510,23 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
     //for readlevel output
     //int r1_q0_den = 0, r2_q0_den = 0;
     //int r1_q0_nerror = 0, r2_q0_nerror = 0;
-    int r1_den =0, r2_den = 0;
     int r1_nerror = 0, r2_nerror = 0;
+    int num = 0;
+    // get denominator
+    auto den = NumEffBases(seg, gr, ref, chrname, blacklist, errorstat, opt.bqual_min, true, opt.count_nonoverlap, false);
+    int r1_den = den.first;
+    int r2_den = den.second;
+    errorstat.neval += r1_den + r2_den;
+
     for (int qcut : errorstat.cutoffs) {
       auto res = NumEffBases(seg, gr, ref, chrname, blacklist, errorstat, qcut, false, opt.count_nonoverlap, false);
       errorstat.qcut_neval[qcut].first += res.first;
       errorstat.qcut_neval[qcut].second += res.second;
     }
 
-    int num = 0;
-    // get denominator
-    auto den = NumEffBases(seg, gr, ref, chrname, blacklist, errorstat, opt.bqual_min, true, opt.count_nonoverlap, false);
-    if (!opt.read_level_stat.empty()) {
-      r1_den = den.first;
-      r2_den = den.second;
-    }
-    errorstat.neval += den.first + den.second;
     if (!opt.cycle_level_stat.empty()) {
       CycleBaseCount(seg, gr, errorstat);
     }
-
     // first pass gets all variants in ROI
     std::map<cpputil::Variant, vector<cpputil::Variant>> var_vars;
     int rstart = 0;
@@ -607,7 +599,7 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
         }
         if (not found) { // error site
           int nerr = n_false_mut(real_muts);
-          if (var.Type() == "SNV" && var.var_qual >= opt.bqual_min && (seg.size() == 1 || readpair_var.size() == 2)) {
+          if (var.Type() == "SNV" && var.var_qual >= opt.bqual_min && (opt.count_nonoverlap || seg.size() == 1 || readpair_var.size() == 2)) {
             num += nerr;
           }
           // mutant_families.txt
@@ -617,7 +609,7 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
               if (not real_muts[ai]) {
                 if (opt.all_mutant_frags) ferr << avars[ai] << '\n';
                 else {
-                  if (avars[ai].var_qual >= opt.bqual_min && (seg.size() == 1 || readpair_var.size() == 2))
+                  if (avars[ai].var_qual >= opt.bqual_min && (opt.count_nonoverlap || seg.size() == 1 || readpair_var.size() == 2 ))
                     ferr << avars[ai] << '\n';
                 }
               }
@@ -625,7 +617,7 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
           } else {
             if (opt.all_mutant_frags) ferr << var << '\n';
             else {
-              if ((var.isIndel() || var.var_qual >= opt.bqual_min) && (seg.size() == 1 || readpair_var.size() == 2))
+              if ((var.isIndel() || var.var_qual >= opt.bqual_min) && (opt.count_nonoverlap || seg.size() == 1 || readpair_var.size() == 2))
                 ferr << var << '\n';
             }
           }
