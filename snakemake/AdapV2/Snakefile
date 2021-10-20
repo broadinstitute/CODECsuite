@@ -25,6 +25,8 @@ AGG_METRICS_SCRIPT=f"{CODEC_root}/snakemake/script/cds_summarize.py"
 AGG_LOG_SCRIPT=f"{CODEC_root}/snakemake/script/agg_log.py"
 SPLIT_SCRIPT=f"{CODEC_root}/snakemake/script/fastqsplit.pl"
 MONOMER_ERROR_SCRIPT = f"{CODEC_root}/snakemake/script/calculate_monomer_error_rate.py"
+UPDATE_MET= f"{CODEC_root}/snakemake/script/updatemet"
+CODEC2MAF= f"{CODEC_root}/snakemake/script/codec2maf"
 
 JAVA_PARAMS = "-Xmx30g -Djava.io.tmpdir=/tmp"
 BWA = "bwa"
@@ -42,6 +44,7 @@ Metrics_OUT="metrics"
 workdir: config["cwd"]
 
 batch_to_fastq = metadata.reset_index().groupby('batch').agg({'fastq1' : set, 'fastq2': set})
+sample_to_vcf = metadata.reset_index().groupby('sample').agg({'germline_vcf' : set})
 print(batch_to_fastq)
 rule SplitFastq1:
     input:
