@@ -84,6 +84,8 @@ add_executable(annotate_bam_with_umis annotate_bam_with_umis.cpp ${BACKWARD_ENAB
 add_backward(annotate_bam_with_umis)
 target_link_libraries(annotate_bam_with_umis z ${CPP_LIBS})
 
+add_executable(mpileup testmpileup.cpp)
+target_link_libraries(mpileup z ${CPP_LIBS})
 #### Some deps
 ###########
 ### SGA

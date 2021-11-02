@@ -44,8 +44,12 @@ Metrics_OUT="metrics"
 workdir: config["cwd"]
 
 batch_to_fastq = metadata.reset_index().groupby('batch').agg({'fastq1' : set, 'fastq2': set})
+batch_to_samplesheet = metadata.reset_index().groupby('batch').agg({'sample_sheet' : set})
+batch_to_samples = metadata.reset_index().groupby('batch').agg({'sample' : set})
+sample_to_batch = metadata.reset_index().groupby('sample').agg({'batch' : set})
 sample_to_vcf = metadata.reset_index().groupby('sample').agg({'germline_vcf' : set})
-print(batch_to_fastq)
+print(sample_to_batch)
+print(batch_to_samples)
 rule SplitFastq1:
     input:
          lambda wildcards: batch_to_fastq.loc[wildcards.id]['fastq1']
@@ -74,33 +78,64 @@ rule SplitFastq2:
          zcat {input} > {output.tmp} && {SPLIT_SCRIPT} {output.tmp} {params.prefix} {params.nsplit}
          """
 
-rule Demux:
+rule DemuxL1:
     input:
-         read1 = "tmp/{batch_id}_split_r1.{ss}.fastq",
-         read2 = "tmp/{batch_id}_split_r2.{ss}.fastq",
+         read1 = "tmp/L001_split_r1.{ss}.fastq",
+         read2 = "tmp/L001_split_r2.{ss}.fastq",
+         sample_sheet = lambda wildcards: batch_to_samplesheet.loc['L001']['sample_sheet']
     output:
-         read1 = temp(expand("demux/{{batch_id}}_split.{{ss}}.{index}.1.fastq.gz", index = sample_names)),
-         read2 = temp(expand("demux/{{batch_id}}_split.{{ss}}.{index}.2.fastq.gz", index = sample_names)),
-         unmatched1 = temp("demux/{batch_id}_split.{ss}.unmatched.1.fastq.gz"),
-         unmatched2 = temp("demux/{batch_id}_split.{ss}.unmatched.2.fastq.gz"),
-         hopped1 = temp("demux/{batch_id}_split.{ss}.hopped.1.fastq.gz"),
-         hopped2 = temp("demux/{batch_id}_split.{ss}.hopped.2.fastq.gz"),
-         log = "demux/{batch_id}_split.{ss}.log",
+         read1 = temp(expand("demux/L001_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L001']['sample'])),
+         read2 = temp(expand("demux/L001_split.{{ss}}.{index}.2.fastq.gz", index = batch_to_samples.loc['L001']['sample'])),
+         unmatched1 = temp("demux/L001_split.{ss}.unmatched.1.fastq.gz"),
+         unmatched2 = temp("demux/L001_split.{ss}.unmatched.2.fastq.gz"),
+         hopped1 = temp("demux/L001_split.{ss}.hopped.1.fastq.gz"),
+         hopped2 = temp("demux/L001_split.{ss}.hopped.2.fastq.gz"),
+         log = "demux/L001_split.{ss}.log",
     wildcard_constraints:
           ss = "[0-9]+"
     params:
-        sample_sheet = config['sample_sheet'],
-        outprefix = "demux/{batch_id}_split.{ss}",
+        outprefix = "demux/L001_split.{ss}",
         ref = {REF}
     shell:
         """
-            {DEMUX} -1 {input.read1} -2 {input.read2} -p {params.sample_sheet} -o {params.outprefix} -r {params.ref}  > {output.log}
+            {DEMUX} -1 {input.read1} -2 {input.read2} -p {input.sample_sheet} -o {params.outprefix} -r {params.ref}  > {output.log}
         """
+
+rule DemuxL2:
+    input:
+         read1 = "tmp/L002_split_r1.{ss}.fastq",
+         read2 = "tmp/L002_split_r2.{ss}.fastq",
+         sample_sheet = lambda wildcards: batch_to_samplesheet.loc['L002']['sample_sheet']
+    output:
+         read1 = expand("demux/L002_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L002']['sample']),
+         read2 = expand("demux/L002_split.{{ss}}.{index}.2.fastq.gz",  index = batch_to_samples.loc['L002']['sample']),
+         unmatched1 = temp("demux/L002_split.{ss}.unmatched.1.fastq.gz"),
+         unmatched2 = temp("demux/L002_split.{ss}.unmatched.2.fastq.gz"),
+         hopped1 = temp("demux/L002_split.{ss}.hopped.1.fastq.gz"),
+         hopped2 = temp("demux/L002_split.{ss}.hopped.2.fastq.gz"),
+         log = "demux/L002_split.{ss}.log",
+    wildcard_constraints:
+          ss = "[0-9]+"
+    params:
+        outprefix = "demux/L002_split.{ss}",
+        ref = {REF}
+    shell:
+        """
+            {DEMUX} -1 {input.read1} -2 {input.read2} -p {input.sample_sheet} -o {params.outprefix} -r {params.ref}  > {output.log}
+        """
+
+# rule Output4Demux:
+#     input:
+#         log = expand("demux/{batch_id}_split.{{ss}}.log", batch_id = batch_ids)
+#     output:
+#         read1 = expand("demux/{batch_id}_split.{{ss}}.{index}.1.fastq.gz", zip, batch_id = metadata.reset_index()['batch'], index = metadata.reset_index()['sample']),
+#         read2 = expand("demux/{batch_id}_split.{{ss}}.{index}.2.fastq.gz", zip, batch_id = metadata.reset_index()['batch'], index = metadata.reset_index()['sample'])
 
 rule Trim:
     input:
         read1 = "demux/{batch_id}_split.{ss}.{index}.1.fastq.gz",
-        read2 = "demux/{batch_id}_split.{ss}.{index}.2.fastq.gz"
+        read2 = "demux/{batch_id}_split.{ss}.{index}.2.fastq.gz",
+        log = "demux/{batch_id}_split.{ss}.log",
     output:
         highconf = temp("adap_trimmed/{batch_id}_split.{ss}.{index}.highconf.bam"),
         lowconf = temp("adap_trimmed/{batch_id}_split.{ss}.{index}.lowconf.bam"),
@@ -116,7 +151,7 @@ rule Trim:
         outprefix = "adap_trimmed/{batch_id}_split.{ss}.{index}",
         rgsm = "{index}"
     resources:
-        mem = 4,
+        mem = 8,
     wildcard_constraints:
         index = "[0-9a-zA-Z_-]+",
         ss = "[0-9]+"
@@ -154,7 +189,7 @@ rule AlignRawTrimmed:
           reference = REF,
     resources:
              mem = 8,
-             ncores = config['ncores'],
+             ncores = 1,
              runtime = 4
     wildcard_constraints:
           index = "[0-9a-zA-Z_-]+"
@@ -234,7 +269,7 @@ rule CDSByProduct:
 
 rule MergeRawGroup:
     input:
-         lambda wildcard: expand("tmp/{batch_id}.{{index}}.raw.aligned.bam", batch_id = batch_ids)
+         lambda wildcard: expand("tmp/{batch_id}.{{index}}.raw.aligned.bam", batch_id = sample_to_batch.loc[wildcard.index]['batch'])
     output:
           bam = temp("tmp/{index}.raw.aligned.bam")
     resources:

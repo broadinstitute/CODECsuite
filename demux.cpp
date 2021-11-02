@@ -134,16 +134,18 @@ int codec_demux(int argc, char ** argv) {
   cpputil::FastxRecord read1;
   cpputil::FastxRecord read2;
   uint64_t total_pf_reads = 0;
+  uint64_t total_reads = 0;
   while (R1_reader.yield(read1)) {
     R2_reader.yield(read2);
+    ++total_reads;
     if (not opt.include_non_pf and (read1.is_filtered() or read2.is_filtered())) continue;
-    total_pf_reads += 1;
-    if (opt.count_PF) continue;
+    ++total_pf_reads;
+    //if (opt.count_PF) continue;
     assert(read1.name() == read2.name());
     ibmatcher.DecodePair(read1, read2, opt.index_begin, opt.index_len);
   }
-  if (opt.count_PF) {
-    std::cerr << "total PF: " << total_pf_reads << std::endl;
-  }
+//  if (opt.count_PF) {
+    std::cerr << "#total, #PF, %PF: " << total_reads << ", " << total_pf_reads << ", " << (float) total_pf_reads / total_reads << std::endl;
+//  }
   return 0;
 }

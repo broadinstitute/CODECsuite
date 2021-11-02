@@ -16,7 +16,7 @@
 #include "SeqLib/BamReader.h"
 #include "SeqLib/BamWriter.h"
 
-#include "SeqLib/FermiAssembler.h"
+//#include "SeqLib/FermiAssembler.h"
 #ifdef BGZF_MAX_BLOCK_SIZE
 #pragma push_macro("BGZF_MAX_BLOCK_SIZE")
 #undef BGZF_MAX_BLOCK_SIZE
@@ -102,26 +102,26 @@ int main(int argc, char** argv) {
     exit(1);
   }
 
-  SeqLib::BamReader br;
-  SeqLib::BamRecordVector brv;
-  SeqLib::BamRecord r;
-  SeqLib::FermiAssembler fermi;
-  br.Open(opt.input_bam);
-  size_t count = 0;
-  while (br.GetNextRecord(r) && count++ < 20000) {
-    brv.push_back(r);
-  }
-  fermi.AddReads(brv);
-  std::cout << "size: " << fermi.NumSequences() << std::endl;
-  fermi.PerformAssembly();
-  std::vector<std::string> contigs = fermi.GetContigs();
-  for (size_t i = 0; i < contigs.size(); ++i) {
-    std::cout << ">contig" << i << std::endl << contigs[i] << std::endl;
-  }
-  return 0;
+//  SeqLib::BamReader br;
+//  SeqLib::BamRecordVector brv;
+//  SeqLib::BamRecord r;
+//  //SeqLib::FermiAssembler fermi;
+//  br.Open(opt.input_bam);
+//  size_t count = 0;
+//  while (br.GetNextRecord(r) && count++ < 20000) {
+//    brv.push_back(r);
+//  }
+//  fermi.AddReads(brv);
+//  std::cout << "size: " << fermi.NumSequences() << std::endl;
+//  fermi.PerformAssembly();
+//  std::vector<std::string> contigs = fermi.GetContigs();
+//  for (size_t i = 0; i < contigs.size(); ++i) {
+//    std::cout << ">contig" << i << std::endl << contigs[i] << std::endl;
+//  }
+//  return 0;
 
-  cpputil::FastxReader R1_reader(opt.i1);
-  cpputil::FastxReader R2_reader(opt.i2);
+//  cpputil::FastxReader R1_reader(opt.i1);
+//  cpputil::FastxReader R2_reader(opt.i2);
   SeqLib::BamReader bam_reader;
   SeqLib::BamWriter bam_writer;
   bam_reader.Open(opt.input_bam);
@@ -129,32 +129,40 @@ int main(int argc, char** argv) {
   bam_writer.Open(opt.output);
   bam_writer.WriteHeader();
 
-  cpputil::FastxRecord read1;
-  cpputil::FastxRecord read2;
+//  cpputil::FastxRecord read1;
+//  cpputil::FastxRecord read2;
   SeqLib::BamRecord b;
   uint32_t read_counter = 0;
   std::string seq;
   while (bam_reader.GetNextRecord(b)) {
-    if (read_counter++ % 2 == 0) {
-      while(R1_reader.yield(read1)) {
-        R2_reader.yield(read2);
-        if (read1.name() != read2.name()) {
-          string errmsg = "read1 query name " + read1.id + " and read2 query name " + read2.id + " do not match!";
-          throw std::runtime_error(errmsg);
-        }
-        if (read1.name() == b.Qname()) {
-          seq = read1.seq + "-" + read2.seq;
-          break;
-        }
-      };
+//    if (read_counter++ % 2 == 0) {
+//      while(R1_reader.yield(read1)) {
+//        R2_reader.yield(read2);
+//        if (read1.name() != read2.name()) {
+//          string errmsg = "read1 query name " + read1.id + " and read2 query name " + read2.id + " do not match!";
+//          throw std::runtime_error(errmsg);
+//        }
+//        if (read1.name() == b.Qname()) {
+//          seq = read1.seq + "-" + read2.seq;
+//          break;
+//        }
+//      };
+//    }
+//    if (read1.name() != b.Qname()) {
+//      string errmsg = "read query name " + read1.name() + " and bam record query name " + b.Qname() + " do not match!";
+//      throw std::runtime_error(errmsg);
+//    }
+    if (b.FirstFlag() && !b.ReverseFlag()) { //F1
+      b.AddZTag("RX", "ATG-CGT");
+    } else if (!b.FirstFlag() && b.ReverseFlag()) { //R2
+      b.AddZTag("RX", "ATG-CGT");
+    } else if (b.FirstFlag() && b.ReverseFlag()) { //R1
+      b.AddZTag("RX", "CGT-ATG");
+    } else if (!b.FirstFlag() && !b.ReverseFlag()) { // F2
+      b.AddZTag("RX", "CGT-ATG");
     }
-    if (read1.name() != b.Qname()) {
-      string errmsg = "read query name " + read1.name() + " and bam record query name " + b.Qname() + " do not match!";
-      throw std::runtime_error(errmsg);
-    }
-    b.AddZTag("RX", seq);
     bam_writer.WriteRecord(b);
-    if (read_counter % 1000000 == 0) {
+    if (read_counter++ % 1000000 == 0) {
       printf("Processed %d reads\n", read_counter);
     }
   }

@@ -35,10 +35,12 @@
 #include "MAF.h"
 #include "TargetLayout.h"
 #include "MutCounter.h"
+#include "Algo.h"
 
 #define OPT_QSCORE_PROF   261
 #define OPT_READ_LEVEL_STAT   262
 #define OPT_CYCLE_LEVEL_STAT   263
+#define OPT_MAX_N_RATE_T2G   264
 using std::string;
 using std::vector;
 int MYINT_MAX = std::numeric_limits<int>::max();
@@ -55,13 +57,15 @@ struct AccuOptions {
   bool load_duplicate = false;
   bool all_mutant_frags = false;
   bool filter_5endclip = false;
-  int max_nm_filter = MYINT_MAX;
-  int max_nonNedit_filter = MYINT_MAX;
+  bool allow_indel_near_snv = false;
+  int max_N_filter = MYINT_MAX;
+  int max_snv_filter = MYINT_MAX;
   int min_fraglen = 0;
   int max_fraglen = MYINT_MAX;
   int verbose = 0;
   double max_mismatch_frac = 1.0;
   float max_N_frac = 1.0;
+  float max_N_frac_T2G = 1.0;
   float min_passQ_frac = 0;
   vector<string> vcfs;
   string sample = "";
@@ -99,15 +103,17 @@ static struct option  accuracy_long_options[] = {
     {"max_fraglen",              required_argument,      0,        'G'},
     {"max_mismatch_frac",        required_argument,      0,        'F'},
     {"filter_5endclip",          no_argument,            0,        '5'},
+    {"allow_indel_near_snv",     no_argument,            0,        'I'},
     {"max_N_frac",               required_argument,      0,        'N'},
-    {"min_passQ_frac",             required_argument,      0,        'Q'},
+    {"max_N_frac_T2G",           required_argument,      0,        OPT_MAX_N_RATE_T2G},
+    {"min_passQ_frac",           required_argument,      0,        'Q'},
     {"known_var_out",            required_argument,      0,        'k'},
     {"context_count",            required_argument,      0,        'C'},
     {"pair_min_overlap",         required_argument,      0,        'p'},
     {"count_nonoverlap",         no_argument,            0,        'c'},
     {"fragend_dist_filter",      required_argument,      0,        'd'},
-    {"max_nm_filter",            required_argument,      0,        'n'},
-    {"max_nonNedit_filter",      required_argument,      0,        'x'},
+    {"max_N_filter",             required_argument,      0,        'n'},
+    {"max_snv_filter",      required_argument,      0,        'x'},
     {"verbose",                  required_argument,      0,        'v'},
     {"all_mutant_frags",         no_argument,             0,        'A'},
     {"detail_qscore_prof",       no_argument,            0,        OPT_QSCORE_PROF},
@@ -115,7 +121,7 @@ static struct option  accuracy_long_options[] = {
     {"cycle_level_stat",         required_argument,      0,        OPT_CYCLE_LEVEL_STAT},
     {0,0,0,0}
 };
-const char* accuracy_short_options = "b:a:m:v:S2us:r:e:q:k:cM:p:d:n:x:V:L:DAC:F:N:5Q:g:G:";
+const char* accuracy_short_options = "b:a:m:v:S2us:r:e:q:k:cM:p:d:n:x:V:L:DAC:F:N:5Q:g:G:I";
 
 void accuracy_print_help()
 {
@@ -147,17 +153,19 @@ void accuracy_print_help()
   std::cerr<< "\nFiltering Options:\n";
   std::cerr<< "-q/--bqual_min,                        Skip bases if min(q1, q2) < this when calculating error rate. q1, q2 are baseQ from R1 and R2 respectively [0].\n";
   std::cerr<< "-Q/--min_passQ_frac,                   Filter out a read if the fraction of bases passing quality threshold (together with -q) is less than this number [0].\n";
-  std::cerr<< "-n/--max_edit_filter,                  Skip a read if its NM tag is larger than this value [INT_MAX].\n";
-  std::cerr<< "-x/--max_nonNedit_filter,              Skip a read if the number of non-N bases edits is larger than this value [INT_MAX].\n";
+  std::cerr<< "-n/--max_N_filter,                     Skip a read if its num of N bases is larger than this value [INT_MAX].\n";
+  std::cerr<< "-x/--max_snv_filter,                   Skip a read if the number of mismatch bases is larger than this value [INT_MAX].\n";
   std::cerr<< "-d/--fragend_dist_filter,              Consider a variant if its distance to the fragment end is at least this value [0].\n";
   std::cerr<< "-F/--max_mismatch_frac,                Filter out a read if its mismatch fraction is larger than this value  [1.0].\n";
   std::cerr<< "-N/--max_N_frac,                       Filter out a read if its fraction of of N larger than this value  [1.0].\n";
+  std::cerr<< "--max_N_frac_T2G,                      Filter out T>G SNV if in its reads, the fraction of of N larger than this value  [1.0].\n";
   std::cerr<< "-5/--filter_5endclip,                  Filter out a read if it has 5'end soft clipping [false].\n";
+  std::cerr<< "-I/--allow_indel_near_snv,             allow SNV to pass filter if a indel is found in the same read [false].\n";
   std::cerr<< "-g/--min_fraglen,                      Filter out a read if its fragment length is less than this value [0].\n";
   std::cerr<< "-G/--max_fraglen,                      Filter out a read if its fragment length is larger than this value [INT_MAX].\n";
   std::cerr<< "-p/--pair_min_overlap,                 When using selector, the minimum overlap between the two ends of the pair. -1 for complete overlap, 0 no overlap required [0].\n";
   std::cerr<< "-c/--count_nonoverlap,                 Count overhang (non overlapping) region of a read pair. When this is true, count #valid bases independently for R1 and R2. [false].\n";
-  std::cerr<< "-A/--all_mutant_frags,                  Output all mutant fragments even if failed by concordant or qscore filters Default [false].\n";
+  std::cerr<< "-A/--all_mutant_frags,                 Output all mutant fragments even if not pass failters. Currently only works for known vars [false].\n";
 }
 
 int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
@@ -189,10 +197,10 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
         opt.min_passQ_frac = atof(optarg);
         break;
       case 'n':
-        opt.max_nm_filter = atoi(optarg);
+        opt.max_N_filter = atoi(optarg);
         break;
       case 'x':
-        opt.max_nonNedit_filter = atoi(optarg);
+        opt.max_snv_filter = atoi(optarg);
         break;
       case 'd':
         opt.fragend_dist_filter = atoi(optarg);
@@ -202,6 +210,9 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
         break;
       case 'N':
         opt.max_N_frac = atof(optarg);
+        break;
+      case OPT_MAX_N_RATE_T2G:
+        opt.max_N_frac_T2G = atof(optarg);
         break;
       case 'g':
         opt.min_fraglen = atoi(optarg);
@@ -223,6 +234,9 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
         break;
       case '5':
         opt.filter_5endclip = true;
+        break;
+      case 'I':
+        opt.allow_indel_near_snv = true;
         break;
       case 'c':
         opt.count_nonoverlap = true;
@@ -279,12 +293,12 @@ std::pair<int,int> NumEffBases(const cpputil::Segments& seg,
     const std::set<int>& blacklist,
     cpputil::ErrorStat& es,
     int minbq,
+    std::pair<int, int>& nq0,
     bool count_context,
     bool count_overhang,
     bool N_is_valid){
   // blacklist represents a set of SNV positions that will not be counted in the error rate calculation
-  int r1 = 0;
-  int r2 = 0;
+  int r1 = 0, r2 = 0, r1q0 = 0, r2q0 = 0;
   std::set<int> baseqblack;
   if (seg.size() == 1) {
     std::pair<int,int> range;
@@ -297,15 +311,15 @@ std::pair<int,int> NumEffBases(const cpputil::Segments& seg,
     }
     if (not br.PairedFlag() or br.FirstFlag()) {
       if (count_context)
-        r1 = cpputil::CountValidBaseAndContextInMatchedBases(br, blacklist, chrname, ref, minbq, baseqblack, es, range.first, range.second, N_is_valid);
+        std::tie(r1,r1q0) = cpputil::CountValidBaseAndContextInMatchedBases(br, blacklist, chrname, ref, minbq, baseqblack, es, range.first, range.second, N_is_valid);
       else
-        r1 = cpputil::CountValidBaseInMatchedBases(br, blacklist, minbq, baseqblack,range.first, range.second, N_is_valid);
+        std::tie(r1, r1q0) = cpputil::CountValidBaseInMatchedBases(br, blacklist, minbq, baseqblack,range.first, range.second, N_is_valid);
     }
     else {
       if (count_context)
-        r2 = cpputil::CountValidBaseAndContextInMatchedBases(br, blacklist, chrname, ref, minbq, baseqblack, es, range.first, range.second, N_is_valid);
+        std::tie(r2, r2q0) = cpputil::CountValidBaseAndContextInMatchedBases(br, blacklist, chrname, ref, minbq, baseqblack, es, range.first, range.second, N_is_valid);
       else
-        r2 = cpputil::CountValidBaseInMatchedBases(br, blacklist, minbq, baseqblack, range.first, range.second, N_is_valid);
+        std::tie(r2, r2q0) = cpputil::CountValidBaseInMatchedBases(br, blacklist, minbq, baseqblack, range.first, range.second, N_is_valid);
     }
   } else {
     std::pair<int, int> overlap_front, overlap_back;
@@ -333,22 +347,23 @@ std::pair<int,int> NumEffBases(const cpputil::Segments& seg,
     if (seg.front().FirstFlag()) {
       size_t r1_nmask;
       if (count_context) {
-        r1 = cpputil::CountValidBaseAndContextInMatchedBases(seg.front(), blacklist, chrname, ref, minbq, baseqblack, es, range_front.first, range_front.second, N_is_valid);
+        std::tie(r1, r1q0) = cpputil::CountValidBaseAndContextInMatchedBases(seg.front(), blacklist, chrname, ref, minbq, baseqblack, es, range_front.first, range_front.second, N_is_valid);
         r1_nmask = baseqblack.size();
         if (count_overhang) baseqblack.clear();// when count_overhang is true, treat R1 and R2 independently
-        r2 = cpputil::CountValidBaseAndContextInMatchedBases(seg.back(), blacklist, chrname, ref, minbq, baseqblack, es, range_back.first, range_back.second, N_is_valid);
+        std::tie(r2, r2q0) = cpputil::CountValidBaseAndContextInMatchedBases(seg.back(), blacklist, chrname, ref, minbq, baseqblack, es, range_back.first, range_back.second, N_is_valid);
       }
       else {
-        r1 = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, baseqblack, range_front.first, range_front.second, N_is_valid);
+        std::tie(r1, r1q0) = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, baseqblack, range_front.first, range_front.second, N_is_valid);
         r1_nmask = baseqblack.size();
         if (count_overhang) baseqblack.clear();
-        r2 = cpputil::CountValidBaseInMatchedBases(seg.back(), blacklist, minbq, baseqblack, range_back.first, range_back.second, N_is_valid);
+        std::tie(r2, r2q0) = cpputil::CountValidBaseInMatchedBases(seg.back(), blacklist, minbq, baseqblack, range_back.first, range_back.second, N_is_valid);
       }
       if (not count_overhang) r1 -= baseqblack.size() - r1_nmask;
     } else {
       throw std::runtime_error("Read order wrong\n");
     }
   }
+  nq0 = std::make_pair(r1q0, r2q0);
   return std::make_pair(r1, r2);
 }
 
@@ -428,24 +443,53 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
   //          }
     // Read level filtering step
     bool keep = true;
-    int32_t r1_numN = 0;
-    int32_t r2_numN = 0;
-    int olen = 0;
+    int32_t frag_numN = 0;
+    int family_size = 0;
 
     // various fragment level filters
     string chrname = seg.front().ChrName(bamheader);
-    auto queryresult = cpputil::GetPairOverlapQStartAndQStop(seg.front(), seg.back());
+    //auto queryresult = cpputil::GetPairOverlapQStartAndQStop(seg.front(), seg.back());
+
+    std::pair<int, int> total_bases(0, 0);
+    std::set<int> emptyblacklist;
+    auto qpass = NumEffBases(seg, nullptr, ref, chrname, emptyblacklist, errorstat, opt.bqual_min, total_bases, false, opt.count_nonoverlap, true);
+    int olen = std::min(total_bases.first, total_bases.second);
+    int nqpass = std::min(qpass.first, qpass.second);
+
+    if (nqpass < olen * opt.min_passQ_frac) {
+      ++errorstat.n_filtered_q30rate;
+      keep = false;
+    }
+
+    if (seg.size() == 2) {
+      frag_numN = std::max(cpputil::CountNBasesInAlignment(seg[0]), cpputil::CountNBasesInAlignment(seg[1]));
+    } else {
+      frag_numN = cpputil::CountNBasesInAlignment(seg[0]);
+    }
+    if (frag_numN > olen * opt.max_N_frac || frag_numN > opt.max_N_filter) {
+      ++errorstat.n_filtered_Nrate;
+      keep = false;
+    }
+
+    if (not keep) {
+      ++errorstat.discard_frag_counter;
+      continue;
+    }
+
+    //various read level filters
     for (const auto &s: seg) {
       //filtering reads before masking because the eof filtering will not update NM tag
-      if (s.NumMatchBases() < 10) {
+      if (s.NumMatchBases() < 1) {
         keep = false;
         break;
       }
+
       if (opt.filter_5endclip && cpputil::NumSoftClip5End(s) > 0) {
           keep = false;
           ++errorstat.n_filtered_sclip;
           break;
       }
+
       if (abs(s.InsertSize()) < opt.min_fraglen ) {
         keep = false;
         ++errorstat.n_filtered_smallfrag;
@@ -456,43 +500,14 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
         ++errorstat.n_filtered_largefrag;
         break;
       }
-      int nm = cpputil::GetNM(s);
-      int32_t numN = cpputil::CountNBasesInAlignment(s);
-      if (s.FirstFlag()) {
-        r1_numN = numN;
-        olen = queryresult.first.second - queryresult.first.first;
-      } else {
-        r2_numN = numN;
-        olen = queryresult.second.second - queryresult.second.first;
-      }
-      if ((float)numN > olen * opt.max_N_frac) {
-        ++errorstat.n_filtered_Nrate;
+
+      if (cpputil::GetNMismatch(s) > opt.max_snv_filter) {
+        ++errorstat.n_filtered_edit;
         keep = false;
         break;
       }
-      if (nm == -1) { // if NM tag not exist, assume cigar is in new version, e.g., "X,="
-        if (cpputil::GetNMismatch(s) > cpputil::GetNumNonIndelAlignedBases(s) * opt.max_mismatch_frac) {
-          ++errorstat.n_filtered_edit;
-          keep = false;
-          break;
-        }
-      } else {
-        if (nm > opt.max_nm_filter || nm - numN > opt.max_nonNedit_filter) {
-          if (opt.verbose) {
-            std::cerr << "Discard read by edit distance filter " << s.Qname() <<"\n";
-          }
-          ++errorstat.n_filtered_edit;
-          keep = false;
-          break;
-        }
-      }
     }
 
-    auto qpass = NumEffBases(seg,nullptr, ref, chrname, blacklist, errorstat, opt.bqual_min, false, opt.count_nonoverlap, true);
-    if (qpass.first < olen * opt.min_passQ_frac | qpass.second < olen * opt.min_passQ_frac) {
-      ++errorstat.n_filtered_q30rate;
-      keep = false;
-    }
 
     if (not keep) {
       ++errorstat.discard_frag_counter;
@@ -511,18 +526,15 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
     //int r1_q0_den = 0, r2_q0_den = 0;
     //int r1_q0_nerror = 0, r2_q0_nerror = 0;
     int r1_nerror = 0, r2_nerror = 0;
-    int num = 0;
     // get denominator
-    auto den = NumEffBases(seg, gr, ref, chrname, blacklist, errorstat, opt.bqual_min, true, opt.count_nonoverlap, false);
+    std::pair<int, int> q0den(0, 0);
+    auto den = NumEffBases(seg, gr, ref, chrname, blacklist, errorstat, opt.bqual_min, q0den, true, opt.count_nonoverlap, false);
     int r1_den = den.first;
     int r2_den = den.second;
+    std::string aux_output = std::to_string(frag_numN) + "\t" + std::to_string(nqpass) + "\t" + std::to_string(olen);
     errorstat.neval += r1_den + r2_den;
-
-    for (int qcut : errorstat.cutoffs) {
-      auto res = NumEffBases(seg, gr, ref, chrname, blacklist, errorstat, qcut, false, opt.count_nonoverlap, false);
-      errorstat.qcut_neval[qcut].first += res.first;
-      errorstat.qcut_neval[qcut].second += res.second;
-    }
+    errorstat.qcut_neval[0].first += q0den.first;
+    errorstat.qcut_neval[0].second += q0den.second;
 
     if (!opt.cycle_level_stat.empty()) {
       CycleBaseCount(seg, gr, errorstat);
@@ -578,82 +590,110 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
         refined_vars.insert(refined_vars.end(), vars.begin(), vars.end());
       }
     }
+    // sort by var type first so that indels are in front
+//    sort(refined_vars.begin(), refined_vars.end(), [](const auto& lhs, const auto& rhs) {
+//      return lhs[0].Type() < rhs[0].Type();
+//    });
     for (const auto& readpair_var: refined_vars) {
-      for (const auto& var : readpair_var) {
-        vector<bool> real_muts;
-        bool found = false;
-        if (var.Type() == "SNV") {
-          real_muts.resize(var.alt_seq.size(), false);
-        }
-        if (bcf_reader.IsOpen()) {
-           found = cpputil::search_var_in_database(bcf_reader, var, known, "PRI_VCF", real_muts, true, opt.bqual_min, opt.all_mutant_frags);
-        }
-        if (bcf_reader2.IsOpen() && not found) {
-          int maskbyvcf1 = n_true_mut(real_muts);
-          found = cpputil::search_var_in_database(bcf_reader2, var, known, "SEC_VCF", real_muts, true, opt.bqual_min, opt.all_mutant_frags);
-          if (var.Type() == "SNV" and var.var_qual >= opt.bqual_min)
-            errorstat.nerror_masked_by_vcf2 += n_true_mut(real_muts) - maskbyvcf1;
-        }
-        if (mafr.IsOpen() && not found) {
-          found = cpputil::search_var_in_database(mafr, var, known, "MAF", real_muts, true, opt.bqual_min, opt.all_mutant_frags);
-        }
-        if (not found) { // error site
-          int nerr = n_false_mut(real_muts);
-          if (var.Type() == "SNV" && var.var_qual >= opt.bqual_min && (opt.count_nonoverlap || seg.size() == 1 || readpair_var.size() == 2)) {
-            num += nerr;
-          }
-          // mutant_families.txt
-          if (n_true_mut(real_muts) > 0) { // partially match
-            auto avars = cpputil::var_atomize(var);
-            for (unsigned ai = 0; ai < real_muts.size(); ++ai) {
-              if (not real_muts[ai]) {
-                if (opt.all_mutant_frags) ferr << avars[ai] << '\n';
-                else {
-                  if (avars[ai].var_qual >= opt.bqual_min && (opt.count_nonoverlap || seg.size() == 1 || readpair_var.size() == 2 ))
-                    ferr << avars[ai] << '\n';
+      auto var = cpputil::squash_vars(readpair_var);
+      //int known_indel_len = 0;
+      vector<bool> real_muts;
+      bool found = false;
+      if (var.Type() == "SNV") {
+        real_muts.resize(var.alt_seq.size(), false);
+      }
+      if (bcf_reader.IsOpen()) {
+         found = cpputil::search_var_in_database(bcf_reader, var, known, "PRI_VCF", real_muts, true, opt.bqual_min, opt.all_mutant_frags);
+      }
+      if (bcf_reader2.IsOpen() && not found) {
+        int maskbyvcf1 = n_true_mut(real_muts);
+        found = cpputil::search_var_in_database(bcf_reader2, var, known, "SEC_VCF", real_muts, true, opt.bqual_min, opt.all_mutant_frags);
+        if (var.Type() == "SNV" and var.var_qual >= opt.bqual_min)
+          errorstat.nerror_masked_by_vcf2 += (n_true_mut(real_muts) - maskbyvcf1) * var.read_count;
+      }
+      if (mafr.IsOpen() && not found) {
+        found = cpputil::search_var_in_database(mafr, var, known, "MAF", real_muts, true, opt.bqual_min, opt.all_mutant_frags);
+      }
+      if (not found) { // error site
+        // mutant_families.txt
+        int nerr = 0, q0nerr = 0;
+        if (n_true_mut(real_muts) > 0) { // partially match
+          auto avars = cpputil::var_atomize(var);
+          for (unsigned ai = 0; ai < real_muts.size(); ++ai) {
+            if (not real_muts[ai]) {
+              if (avars[ai].var_qual >= opt.bqual_min &&
+                  (opt.count_nonoverlap || seg.size() == 1 || readpair_var.size() == 2 )) {
+                if (not opt.allow_indel_near_snv && cpputil::IndelLen(seg.front())> 0) {
+                  errorstat.mismatch_filtered_by_indel += var.read_count;
+                } else {
+                  if (avars[ai].MutType() == "T>G" and (float) frag_numN > olen * opt.max_N_frac_T2G) {
+                    errorstat.lowconf_t2g += var.read_count;
+                  } else {
+                    nerr += var.read_count;
+                    ferr << avars[ai] << '\t' << aux_output <<'\n';
+                  }
                 }
+              } else { // q0 erorr rate
+                q0nerr += var.read_count;
+              }
+            }
+          }
+        } else {
+          if (var.isIndel()) {
+            ferr << var << '\t' << aux_output <<'\n';
+          } else if (var.Type() == "SNV" &&
+                    var.var_qual >= opt.bqual_min &&
+                    (opt.count_nonoverlap || seg.size() == 1 || readpair_var.size() == 2)) {
+            if (not opt.allow_indel_near_snv && cpputil::IndelLen(seg.front())> 0) {
+              errorstat.mismatch_filtered_by_indel += var.read_count;
+            } else {
+              if (var.MutType() == "T>G" and (float) frag_numN > olen * opt.max_N_frac_T2G) {
+                errorstat.lowconf_t2g += var.read_count;
+              } else {
+                nerr = n_false_mut(real_muts) * var.read_count;
+                ferr << var << '\t' << aux_output <<'\n';
               }
             }
           } else {
-            if (opt.all_mutant_frags) ferr << var << '\n';
-            else {
-              if ((var.isIndel() || var.var_qual >= opt.bqual_min) && (opt.count_nonoverlap || seg.size() == 1 || readpair_var.size() == 2))
-                ferr << var << '\n';
-            }
+            q0nerr = n_false_mut(real_muts) * var.read_count;
           }
+        }
+        errorstat.nerror += nerr;
+        if (var.read_count == 2) {
+          errorstat.qcut_nerrors[0].first += q0nerr;
+          errorstat.qcut_nerrors[0].second += q0nerr;
+        } else {
+          if (var.first_of_pair)
+            errorstat.qcut_nerrors[0].first += q0nerr;
+          else
+            errorstat.qcut_nerrors[0].second += q0nerr;
+        }
 
-          // other error profiles
-          if (var.Type() == "SNV") {
-            for (int qcut : errorstat.cutoffs) {
-              if (var.var_qual >= qcut) {
-                //if duplicate fragments are merged after paired consensus, a pair of bases can be different.
-                //In this case, we are not filtering discordant pair.
-                if (var.first_of_pair) {
-                  errorstat.qcut_nerrors[qcut].first += nerr;
-                } else {
-                  errorstat.qcut_nerrors[qcut].second += nerr;
-                }
+        // other error profiles
+        if (var.Type() == "SNV") {
+          if (!opt.read_level_stat.empty()) {
+            if (var.var_qual >= opt.bqual_min && (seg.size() == 1 || readpair_var.size() == 2)) {
+              if (var.read_count == 2) {
+                r1_nerror += nerr;
+                r2_nerror += nerr;
               }
-            }
-            if (!opt.read_level_stat.empty()) {
-              if (var.var_qual >= opt.bqual_min && (seg.size() == 1 || readpair_var.size() == 2)) {
+              else {
                 if (var.first_of_pair ) r1_nerror += nerr;
                 else r2_nerror += nerr;
               }
             }
-            //per cycle profile
-            if (!opt.cycle_level_stat.empty()) {
-              int tpos = var.alt_start < 0 ?  abs(var.alt_start + 1): var.alt_start;
-              var.first_of_pair ? errorstat.R1_q0_error[tpos] += nerr : errorstat.R2_q0_error[tpos] += nerr;
-              if (var.var_qual >= 30) {
-                var.first_of_pair ? errorstat.R1_q30_error[tpos] += nerr: errorstat.R2_q30_error[tpos] += nerr;
-              }
+          }
+          //per cycle profile
+          if (!opt.cycle_level_stat.empty()) {
+            int tpos = var.alt_start < 0 ?  abs(var.alt_start + 1): var.alt_start;
+            var.first_of_pair ? errorstat.R1_q0_error[tpos] += nerr : errorstat.R2_q0_error[tpos] += nerr;
+            if (var.var_qual >= 30) {
+              var.first_of_pair ? errorstat.R1_q30_error[tpos] += nerr: errorstat.R2_q30_error[tpos] += nerr;
             }
-          } //end other profiles
-        }
+          }
+        } //end other profiles
       }
     }
-    errorstat.nerror += num;
 
     if (readlevel.is_open()) {
       readlevel << seg.front().Qname() << '\t'
@@ -661,8 +701,7 @@ void ErrorRateDriver(const vector<cpputil::Segments>& frag,
                 << r2_nerror << '\t'
                 << r1_den  << '\t'
                 << r2_den << '\t'
-                << r1_numN << '\t'
-                << r2_numN << '\t'
+                << frag_numN << '\t'
                 << abs(seg.front().InsertSize()) << '\t'
                 << olen << '\n';
     }
@@ -703,7 +742,7 @@ int codec_accuracy(int argc, char ** argv) {
   std::ofstream readlevel;
   std::ofstream cyclelevel;
   string error_profile_header =
-      "chrom\tref_pos\tref\talt\ttype\tread_pos\tsnv_base_qual\tfirst_of_pair\tread_name";
+      "chrom\tref_pos\tref\talt\ttype\tdist_to_fragend\tsnv_base_qual\tread_count\tread_name\tfamily_size\tnumN\tnumQ30\tolen";
   ferr << error_profile_header << std::endl;
   if (not opt.known_var_out.empty()) {
     known.open(opt.known_var_out);
@@ -714,7 +753,7 @@ int codec_accuracy(int argc, char ** argv) {
   if (not opt.read_level_stat.empty()) {
     readlevel.open(opt.read_level_stat);
     string read_level_header =
-        "read_name\tR1_nerror\tR2_nerror\tR1_efflen\tR2_efflen\tR1_numN\tR2_numN\tfraglen\toverlap_len";
+        "read_name\tR1_nerror\tR2_nerror\tR1_efflen\tR2_efflen\tfrag_numN\tfraglen\toverlap_len";
     readlevel << read_level_header << std::endl;
   }
   if (not opt.cycle_level_stat.empty()) {
@@ -744,8 +783,14 @@ int codec_accuracy(int argc, char ** argv) {
   // SeqLib::GenomicRegion gr;
   //while(tl.NextRegion(gr)) {
   vector<vector<cpputil::Segments>> chunk;
+  std::unordered_set<std::string> pass_qnames;
+  int last_chrom = -1;
+  cpputil::UniqueQueue readpair_cnt(100000);
   for (int i = 0; i < tl.NumRegion(); ++i) {
     const auto& gr = tl[i];
+    if (gr.chr != last_chrom) {
+      readpair_cnt.clearQueue();
+    }
     if (i % 100000 == 0) {
       auto timenow = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
       std::cerr << i + 1 << " region processed. Last position: " << gr << std::ctime(&timenow) << std::endl;
@@ -755,7 +800,8 @@ int codec_accuracy(int argc, char ** argv) {
       if (bcf_reader.IsOpen()) {
         bcf_reader.vcf_to_blacklist_snv(gr, isf.bamheader(), blacklist);
       }
-      for (auto frag : chunk) {
+      for (const vector<cpputil::Segments>& frag : chunk) {
+        readpair_cnt.add(frag[0][0].Qname());
         ErrorRateDriver(frag, isf.bamheader(), isf.IsPairEndLib() & !opt.load_unpair, ref, &gr, blacklist, opt,
                         bcf_reader, bcf_reader2,
                         mafr, ferr, known, readlevel, errorstat);
@@ -766,6 +812,7 @@ int codec_accuracy(int argc, char ** argv) {
   std::cerr << "All region processed \n";
 
   vector<string> header = {"qcutoff",
+                           "n_trim",
                                      "n_bases_eval",
                                      "n_A_eval",
                                      "n_C_eval",
@@ -774,15 +821,18 @@ int codec_accuracy(int argc, char ** argv) {
                                      "n_errors",
                                      "erate",
                                      "n_errors_masked_by_vcf2",
-                                     "num_pairs",
-                                     "num_unpaireds",
-                                     "n_filtered_total",
-                                     "n_filtered_q30rate",
-                                     "n_filtered_Nrate",
-                                     "n_filtered_smallfrag",
-                                     "n_filtered_largefrag",
-                                     "n_filtered_scalip",
-                                     "n_filtered_edit"};
+                                     "n_readpairs",
+                                     "nseg_passfilter",
+                                     "nseg_filtered_total",
+                                     "nseg_filtered_q30rate",
+                                     "nseg_filtered_Nrate",
+                                     "nseg_filtered_smallfrag",
+                                     "nseg_filtered_largefrag",
+                                     "nseg_filtered_scalip",
+                                     "nseg_filtered_edit",
+                                     "n_mismatch_filtered_by_indel",
+                                     "n_t2g_low_conf",
+                                     "q30_rate"};
 
   for (const auto& duo : errorstat.qcut_nerrors) {
     header.push_back("q" + std::to_string(duo.first) + "_n_bases_eval" );
@@ -798,6 +848,7 @@ int codec_accuracy(int argc, char ** argv) {
 
   stat << cpputil::join(header, "\t") << std::endl;
   stat << opt.bqual_min << '\t'
+       << opt.fragend_dist_filter << '\t'
        << errorstat.neval << '\t'
       << errorstat.base_counter['A'] << '\t'
       << errorstat.base_counter['C'] << '\t'
@@ -806,15 +857,18 @@ int codec_accuracy(int argc, char ** argv) {
       << errorstat.nerror << '\t'
        << (float) errorstat.nerror / errorstat.neval << '\t'
        << errorstat.nerror_masked_by_vcf2 << '\t'
+       << readpair_cnt.NumAdded() << '\t'
        << errorstat.pair_counter << '\t'
-       << errorstat.single_counter << '\t'
        << errorstat.discard_frag_counter << '\t'
        << errorstat.n_filtered_q30rate << '\t'
        << errorstat.n_filtered_Nrate << '\t'
        << errorstat.n_filtered_smallfrag << '\t'
        << errorstat.n_filtered_largefrag << '\t'
        << errorstat.n_filtered_sclip << '\t'
-       << errorstat.n_filtered_edit << '\t';
+       << errorstat.n_filtered_edit << '\t'
+       << errorstat.mismatch_filtered_by_indel << '\t'
+       << errorstat.lowconf_t2g << '\t'
+       << (float) errorstat.neval / (errorstat.qcut_neval[0].first + errorstat.qcut_neval[0].second)  << '\t';
 
   int ii = 0;
   for (const auto& qcut : errorstat.cutoffs) {
