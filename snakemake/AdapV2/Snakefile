@@ -48,6 +48,7 @@ batch_to_samplesheet = metadata.reset_index().groupby('batch').agg({'sample_shee
 batch_to_samples = metadata.reset_index().groupby('batch').agg({'sample' : set})
 sample_to_batch = metadata.reset_index().groupby('sample').agg({'batch' : set})
 sample_to_vcf = metadata.reset_index().groupby('sample').agg({'germline_vcf' : set})
+sample_to_germbam = metadata.reset_index().groupby('sample').agg({'germline_bam' : set})
 print(sample_to_batch)
 print(batch_to_samples)
 rule SplitFastq1:
@@ -107,8 +108,8 @@ rule DemuxL2:
          read2 = "tmp/L002_split_r2.{ss}.fastq",
          sample_sheet = lambda wildcards: batch_to_samplesheet.loc['L002']['sample_sheet']
     output:
-         read1 = expand("demux/L002_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L002']['sample']),
-         read2 = expand("demux/L002_split.{{ss}}.{index}.2.fastq.gz",  index = batch_to_samples.loc['L002']['sample']),
+         read1 = temp(expand("demux/L002_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L002']['sample'])),
+         read2 = temp(expand("demux/L002_split.{{ss}}.{index}.2.fastq.gz",  index = batch_to_samples.loc['L002']['sample'])),
          unmatched1 = temp("demux/L002_split.{ss}.unmatched.1.fastq.gz"),
          unmatched2 = temp("demux/L002_split.{ss}.unmatched.2.fastq.gz"),
          hopped1 = temp("demux/L002_split.{ss}.hopped.1.fastq.gz"),

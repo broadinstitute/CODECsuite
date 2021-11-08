@@ -7,9 +7,9 @@ DBSNP= config['dbsnp']
 rule all:
     input:
          expand(ACCU_OUT + "/{index}.done", index = sample_names),
-            expand(Metrics_OUT + "/{index}.raw.insert_size_metrics.txt",index = sample_names),
-            expand(Metrics_OUT + "/byproduct/{batch_id}.{index}.byproduct.txt", zip, batch_id = metadata.reset_index()['batch'], index = metadata.reset_index()['sample']),
-            expand(Metrics_OUT + "/{index}.{type}.wgs_metrics.txt",index = sample_names, type=['cds_consensus', 'raw', 'cds_consensus.mol_consensus'])
+#             expand(Metrics_OUT + "/{index}.raw.insert_size_metrics.txt",index = sample_names),
+#             expand(Metrics_OUT + "/byproduct/{batch_id}.{index}.byproduct.txt", zip, batch_id = metadata.reset_index()['batch'], index = metadata.reset_index()['sample']),
+#             expand(Metrics_OUT + "/{index}.{type}.wgs_metrics.txt",index = sample_names, type=['cds_consensus', 'raw', 'cds_consensus.mol_consensus'])
 
 rule CollectRawWgsMetrics:
     input:
@@ -38,7 +38,7 @@ rule DuplexConsensus:
          ncores = 4,
     shell:
          """
-         {CONSENSUS_BIN} -b {input} -o {output.tmp} -m 0 -C -q 0 -p 1 -d {params.tmpdir} -T {resources.ncores} &&
+         {CONSENSUS_BIN} -b {input} -o {output.tmp} -m 0 -q 0 -p 1 -d {params.tmpdir} -T {resources.ncores} &&
          {PICARD} SortSam I={output.tmp} O={output.bam} SO=queryname
          """
 
@@ -274,25 +274,48 @@ rule CDSErrorMetrics:
           high_conf_region = EAVL_REGION_BED,
           dbsnp = DBSNP,
           germ_vcf = lambda wildcards : sample_to_vcf.loc[wildcards.index]['germline_vcf'],
+          germ_bam = lambda wildcards : sample_to_germbam.loc[wildcards.index]['germline_bam'],
     resources:
              mem = 8,
              runtime = 96
     shell:
+#          """
+#             {ACCU_BIN}  -b {input.bam} \
+#                 -L {params.high_conf_region} \
+#                 -r {params.ref} \
+#                 -n {params.germ_bam} \
+#                 -m 60 \
+#                 -q 30 \
+#                 -d 12 \
+#                 -V {params.germ_vcf},{params.dbsnp} \
+#                 -x 2 \
+#                 -5 \
+#                 -Q 0.35 \
+#                 -g 30 \
+#                 -G 200 \
+#                 -N 0.15 \
+#                 --max_N_frac_T2G 0.04 \
+#                 -a {output.accu} \
+#                 -e {output.error} \
+#                 -C {output.context}
+#          """
          """
             {ACCU_BIN}  -b {input.bam} \
                 -L {params.high_conf_region} \
                 -r {params.ref} \
+                -n {params.germ_bam} \
                 -m 60 \
                 -q 30 \
                 -d 12 \
                 -V {params.germ_vcf},{params.dbsnp} \
-                -x 2 \
+                -x 4 \
+                -c 3 \
                 -5 \
-                -Q 0.35 \
+                -Q 0.5 \
                 -g 30 \
-                -G 200 \
-                --max_N_frac_T2G 0.04 \
-                -N 0.15 \
+                -G 250 \
+                -N 0.10 \
+                --max_N_frac_T2G 0.05 \
                 -a {output.accu} \
                 -e {output.error} \
                 -C {output.context}
