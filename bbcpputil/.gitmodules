@@ -1,0 +1,12 @@
+[submodule "third_party/backward-cpp"]
+	path = third_party/backward-cpp
+	url = https://github.com/bombela/backward-cpp
+[submodule "third_party/spoa"]
+	path = third_party/spoa
+	url = git@github.com:rvaser/spoa.git
+[submodule "third_party/SeqLib"]
+	path = third_party/SeqLib
+	url = git@github.com:ruolin/SeqLib.git
+[submodule "third_party/seqan"]
+	path = third_party/seqan
+	url = git@github.com:ruolin/seqan.git 
