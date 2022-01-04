@@ -1,0 +1,19 @@
+Notice of Third Party Code Dependencies
+
+CODECsuite is distributed, in part, under and subject to the provisions of respective licenses for the following dependencies: 
+
+1. SeqLib
+Copyright 2016 Jeremiah A. Wala. All rights reserved.
+https://github.com/walaj/SeqLib/blob/master/LICENSE
+
+2. backward-cpp
+Copyright (c) 2013 Google Inc. All rights reserved.
+https://github.com/bombela/backward-cpp/blob/master/LICENSE.txt
+
+3. seqan
+Copyright (c) 2006-2018 Knut Reinert, FU Berlin. All rights reserved.
+https://github.com/seqan/seqan/blob/master/LICENSE
+
+4. spoa
+Copyright (c) 2016 Robert Vaser. All rights reserved.
+https://github.com/rvaser/spoa/blob/master/LICENSE
