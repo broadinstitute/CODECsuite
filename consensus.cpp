@@ -204,7 +204,11 @@ int codec_consensus(int argc, char ** argv) {
           ++ read_counter;
           if (ol > 0) {
             std::vector<std::string> orig_quals; // consensus output
-            auto seq = cpputil::MergePair(seg, opt.trim_overhang, opt.minbq, orig_quals); // trim overhang if true
+            std::vector<std::string> seqs;
+            for (auto&s : seg) {
+              seqs.push_back(s.Sequence());
+            }
+            auto seq = cpputil::MergePair(seg, seqs, opt.trim_overhang, opt.minbq, orig_quals); // trim overhang if true
             if (seg.front().FirstFlag()) {
               writer.WriteRecord(seg.front(), seg.back(), seq.first, seq.second, orig_quals.front(), orig_quals.back());
             }

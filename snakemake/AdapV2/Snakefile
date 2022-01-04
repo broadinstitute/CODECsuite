@@ -5,6 +5,7 @@ metadata = pd.read_csv(metadata_file, sep="\t").set_index(["batch","sample"])
 nparallel = config['nparallel'] if 'nparallel' in config else 40
 tmpdir=config['tmpdir']
 
+
 batch_ids, sample_names = list(zip(*metadata.index))
 batch_ids = set(batch_ids)
 sample_names = set(sample_names)
@@ -28,7 +29,7 @@ MONOMER_ERROR_SCRIPT = f"{CODEC_root}/snakemake/script/calculate_monomer_error_r
 UPDATE_MET= f"{CODEC_root}/snakemake/script/updatemet"
 CODEC2MAF= f"{CODEC_root}/snakemake/script/codec2maf"
 
-JAVA_PARAMS = "-Xmx30g -Djava.io.tmpdir=/tmp"
+JAVA_PARAMS = "-Xmx30g -Djava.io.tmpdir=./tmp"
 BWA = "bwa"
 PICARD = f"java {JAVA_PARAMS} -jar $PICARD"
 GATK = f"{config['gatk4']} --java-options \"{JAVA_PARAMS}\""
@@ -49,8 +50,6 @@ batch_to_samples = metadata.reset_index().groupby('batch').agg({'sample' : set})
 sample_to_batch = metadata.reset_index().groupby('sample').agg({'batch' : set})
 sample_to_vcf = metadata.reset_index().groupby('sample').agg({'germline_vcf' : set})
 sample_to_germbam = metadata.reset_index().groupby('sample').agg({'germline_bam' : set})
-print(sample_to_batch)
-print(batch_to_samples)
 rule SplitFastq1:
     input:
          lambda wildcards: batch_to_fastq.loc[wildcards.id]['fastq1']
@@ -103,27 +102,27 @@ rule DemuxL1:
         """
 
 rule DemuxL2:
-    input:
-         read1 = "tmp/L002_split_r1.{ss}.fastq",
-         read2 = "tmp/L002_split_r2.{ss}.fastq",
-         sample_sheet = lambda wildcards: batch_to_samplesheet.loc['L002']['sample_sheet']
-    output:
-         read1 = temp(expand("demux/L002_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L002']['sample'])),
-         read2 = temp(expand("demux/L002_split.{{ss}}.{index}.2.fastq.gz",  index = batch_to_samples.loc['L002']['sample'])),
-         unmatched1 = temp("demux/L002_split.{ss}.unmatched.1.fastq.gz"),
-         unmatched2 = temp("demux/L002_split.{ss}.unmatched.2.fastq.gz"),
-         hopped1 = temp("demux/L002_split.{ss}.hopped.1.fastq.gz"),
-         hopped2 = temp("demux/L002_split.{ss}.hopped.2.fastq.gz"),
-         log = "demux/L002_split.{ss}.log",
-    wildcard_constraints:
-          ss = "[0-9]+"
-    params:
-        outprefix = "demux/L002_split.{ss}",
-        ref = {REF}
-    shell:
-        """
-            {DEMUX} -1 {input.read1} -2 {input.read2} -p {input.sample_sheet} -o {params.outprefix} -r {params.ref}  > {output.log}
-        """
+ input:
+      read1 = "tmp/L002_split_r1.{ss}.fastq",
+      read2 = "tmp/L002_split_r2.{ss}.fastq",
+      sample_sheet = lambda wildcards: batch_to_samplesheet.loc['L002']['sample_sheet']
+ output:
+      read1 = temp(expand("demux/L002_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L002']['sample'])),
+      read2 = temp(expand("demux/L002_split.{{ss}}.{index}.2.fastq.gz",  index = batch_to_samples.loc['L002']['sample'])),
+      unmatched1 = temp("demux/L002_split.{ss}.unmatched.1.fastq.gz"),
+      unmatched2 = temp("demux/L002_split.{ss}.unmatched.2.fastq.gz"),
+      hopped1 = temp("demux/L002_split.{ss}.hopped.1.fastq.gz"),
+      hopped2 = temp("demux/L002_split.{ss}.hopped.2.fastq.gz"),
+      log = "demux/L002_split.{ss}.log",
+ wildcard_constraints:
+       ss = "[0-9]+"
+ params:
+     outprefix = "demux/L002_split.{ss}",
+     ref = {REF}
+ shell:
+     """
+         {DEMUX} -1 {input.read1} -2 {input.read2} -p {input.sample_sheet} -o {params.outprefix} -r {params.ref}  > {output.log}
+     """
 
 # rule Output4Demux:
 #     input:
@@ -165,9 +164,9 @@ rule SortInQueryOrder:
     input:
          "adap_trimmed/{batch_id}_split.{ss}.{index}.{type}.bam",
     output:
-          temp("adap_trimmed/{batch_id}_split.{ss}.{index}.{type}.querysort.bam"),
+          "adap_trimmed/{batch_id}_split.{ss}.{index}.{type}.querysort.bam",
     resources:
-        mem = 16,
+        mem = 8,
         runtime = 2,
     wildcard_constraints:
         index = "[0-9a-zA-Z_-]+"
@@ -275,7 +274,7 @@ rule MergeRawGroup:
           bam = temp("tmp/{index}.raw.aligned.bam")
     resources:
              mem = 8,
-             ncores = config['ncores'],
+             ncores = 1,
              runtime = 16,
     wildcard_constraints:
         index = "[0-9a-zA-Z_-]+"
@@ -293,7 +292,7 @@ rule ReplaceRawReadGroup:
     params:
         sid = "{index}"
     resources:
-        mem = 24,
+        mem = 8,
         runtime = 16,
     shell:
         """
@@ -312,7 +311,7 @@ rule MarkRawDuplicates:
     input:
         bam = "tmp/{index}.raw.replacerg.bam"
     resources:
-        mem = 32,
+        mem = 16,
         runtime = 16,
     output:
         bam = "tmp/{index}.raw.replacerg.markdup.bam",
@@ -332,4 +331,149 @@ rule CollectInsertSizeMetrics:
     shell:
          """
          {PICARD} CollectInsertSizeMetrics I={input.bam} O={output.txt} H={output.hist} M=0.5 W=600 DEVIATIONS=100
+         """
+
+rule DuplexConsensus:
+    input:
+         "tmp/{index}.raw.replacerg.markdup.bam",
+    output:
+         tmp =  temp("tmp/{index}.consensus.tmp.bam"),
+         bam = temp("consensus/{index}.consensus.bam")
+    params:
+         tmpdir = "tmp"
+    resources:
+         mem = 8,
+         runtime = 32,
+         ncores = config['ncores'],
+    shell:
+         """
+         {CONSENSUS_BIN} -b {input} -o {output.tmp} -m 0 -q 0 -p 1 -d {params.tmpdir} -T {resources.ncores} &&
+         {PICARD} SortSam I={output.tmp} O={output.bam} SO=queryname TMP_DIR=./tmp
+         """
+
+rule AlignConsensus:
+    input:
+         "consensus/{index}.consensus.bam"
+    output:
+          fastq1 = temp("tmp/{index}.1.fq"),
+          fastq2 = temp("tmp/{index}.2.fq"),
+          tmp = temp("tmp/{index}.aligned_tmp.bam"),
+          bam = temp("consensus/{index}.cds_consensus.replacerg.bam"),
+          bai = temp("consensus/{index}.cds_consensus.replacerg.bai")
+    params:
+          reference = REF,
+    resources:
+             mem = 8,
+             ncores = config['ncores'],
+             runtime = 48
+    shell:
+         """
+         {PICARD} SamToFastq \
+             I={input} \
+             FASTQ={output.fastq1} \
+             SECOND_END_FASTQ={output.fastq2} &&
+         {BWA} mem \
+             -K 100000000 \
+             -Y \
+             -t {resources.ncores} \
+             {params.reference} {output.fastq1} {output.fastq2} > {output.tmp} &&
+         {PICARD} MergeBamAlignment \
+             ALIGNED={output.tmp} \
+             UNMAPPED={input} \
+             O={output.bam} \
+             R={params.reference} \
+             TMP_DIR={tmpdir} \
+             CREATE_INDEX=true \
+             MAX_RECORDS_IN_RAM=5000000
+         """
+
+rule MarkDuplicates:
+    input:
+        bam = "consensus/{index}.cds_consensus.replacerg.bam"
+    resources:
+        mem = 16,
+        runtime = 16,
+    output:
+        bam = "consensus/{index}.cds_consensus.replacerg.markdup.bam",
+        met = "metrics/{index}.marked_duplicates.txt"
+    shell:
+        """
+        {PICARD} MarkDuplicates I={input.bam} O={output.bam} M={output.met} CREATE_INDEX=true \
+            TAG_DUPLICATE_SET_MEMBERS=true TAGGING_POLICY=All PG=null BARCODE_TAG=RX DUPLEX_UMI=true
+        """
+
+rule GroupReadByUMI:
+    input:
+         "consensus/{index}.cds_consensus.replacerg.bam",
+    output:
+         bam = "groupbyumi/{index}.cds_consensus.GroupedByUmi.bam",
+         histogram = Metrics_OUT + "/{index}.cds_consensus.umiHistogram.txt"
+    resources:
+             mem = 16,
+             runtime = 32
+    shell:
+         """
+         {FGBIO} GroupReadsByUmi \
+             -i {input} \
+             -o {output.bam} \
+             -f {output.histogram} \
+             --strategy=edit \
+         """
+
+rule CallMolecularConsensusReads:
+    input:
+         "groupbyumi/{index}.cds_consensus.GroupedByUmi.bam",
+    output:
+         temp("tmp/{index}.cds_consensus.mol_consensus.bam")
+    params:
+          rg = "{index}"
+    resources:
+             mem = 12,
+             runtime = 36
+    shell:
+         """
+
+         {FGBIO} CallMolecularConsensusReads \
+             -i {input} \
+             -o {output} \
+             -p {params.rg} \
+             -M 1
+         """
+
+rule AlignMolecularConsensusReads:
+    input:
+         "tmp/{index}.cds_consensus.mol_consensus.bam"
+    output:
+          fastq1 = temp("tmp/{index}_1.fq"),
+          fastq2 = temp("tmp/{index}_2.fq"),
+          tmp = temp("tmp/{index}.mol_consensus.aligned_tmp.bam"),
+          bam = "consensus/{index}.cds_consensus.mol_consensus.aligned.bam",
+          bai = "consensus/{index}.cds_consensus.mol_consensus.aligned.bai"
+    params:
+          reference = REF,
+    resources:
+             mem = 8,
+             runtime = 96,
+             ncores = config['ncores']
+    shell:
+         """
+         {PICARD} SamToFastq \
+             I={input} \
+             FASTQ={output.fastq1} \
+             SECOND_END_FASTQ={output.fastq2} &&
+
+         {BWA} mem \
+             -K 100000000 \
+             -t {resources.ncores} \
+             -Y \
+             {params.reference} {output.fastq1} {output.fastq2} > {output.tmp} &&
+
+         {PICARD} MergeBamAlignment \
+             ALIGNED={output.tmp} \
+             UNMAPPED={input} \
+             O={output.bam} \
+             CREATE_INDEX=true \
+             MAX_RECORDS_IN_RAM=5000000 \
+             TMP_DIR={tmpdir} \
+             R={params.reference}
          """

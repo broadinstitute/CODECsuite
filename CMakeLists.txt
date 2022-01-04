@@ -71,7 +71,7 @@ if (NOT TARGET spoa)
 endif ()
 
 set(deps bbcpputil/cpp/AlignmentConsensus.cpp bbcpputil/cpp/BamRecordExt.cpp)
-set(subcommand demux.cpp trimadapter.cpp alignment_consensus.cpp accuracy.cpp)
+set(subcommand demux.cpp trimadapter.cpp consensus.cpp accuracy.cpp filter.cpp)
 add_executable(codec codec.cpp ${subcommand} ${deps} ${BACKWARD_ENABLE})
 add_backward(codec)
 target_link_libraries(codec ${CPP_LIBS} spoa)

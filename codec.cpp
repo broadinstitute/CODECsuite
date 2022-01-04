@@ -15,6 +15,7 @@ int codec_demux(int argc, char **argv);
 int codec_trim(int argc, char **argv);
 int codec_consensus(int argc, char **argv);
 int codec_accuracy(int argc, char **argv);
+int codec_filter(int argc, char ** argv);
 
 
 int print_help()
@@ -27,6 +28,7 @@ int print_help()
   std::cout<< "                     trim                       trim CODEC adapter sequence.\n";
   std::cout<< "                     consensus                  merging overlapping paired ends.\n";
   std::cout<< "                     accuracy                   per-base alignment accuracy.\n";
+  std::cout<< "                     filter                     fragment level filtering.\n";
   std::cout<< "---------------------------------------------------\n";
   std::cout<< "Optional command:    annotate_bam_with_umis     add UMI to bam.\n";
   std::cout<< "                     trimbam                    trim ends of fragment.\n";
@@ -43,6 +45,7 @@ int main(int argc, char *argv[]) {
   else if (strcmp(argv[1], "trim") == 0) ret = codec_trim(argc-1, argv+1);
   else if (strcmp(argv[1], "consensus") == 0) ret = codec_consensus(argc-1, argv+1);
   else if (strcmp(argv[1], "accuracy") == 0) ret = codec_accuracy(argc-1, argv+1);
+  else if (strcmp(argv[1], "filter") == 0) ret = codec_filter(argc-1, argv+1);
   else {
     std::cerr << "[codec] unrecongnized command " << argv[1] << std::endl;
     print_help();
