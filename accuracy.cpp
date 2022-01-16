@@ -77,7 +77,7 @@ struct AccuOptions {
   string sample = "";
   string reference;
   int fragend_dist_filter = 0;
-  int indel_anchor_size= 3;
+  int indel_anchor_size= 1;
   string known_var_out;
   string context_count = "context_count.txt";
   bool detail_qscore_prof = false;
@@ -313,7 +313,7 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
 }
 
 
-std::pair<int,int> NumEffBases(const cpputil::Segments& seg,
+std::pair<int,int> CountDenom(const cpputil::Segments& seg,
     const SeqLib::GenomicRegion* const gr,
     const SeqLib::RefGenome& ref,
     const string& chrname,
@@ -463,15 +463,18 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
 
   for (auto& seg : frag) { // a fragment may have multiple segs due to supplementary alignments
 
-    std::vector<std::string> orig_quals;
+    std::vector<std::string> orig_qualities;
+    std::vector<std::string> dummy_quals;
     std::vector<std::string> orig_seqs;
     //EOF filter
     if (seg.size() == 2) {
       orig_seqs = {seg[0].Sequence(), seg[1].Sequence()};
+      orig_qualities = {seg[0].Qualities(), seg[1].Qualities()};
       ++errorstat.n_pass_filter_pairs;
       cpputil::TrimPairFromFragEnd(seg.front(), seg.back(), opt.fragend_dist_filter);
     } else if(seg.size() == 1) {
       orig_seqs = {seg[0].Sequence()};
+      orig_qualities = {seg[0].Qualities()};
       ++errorstat.n_pass_filter_singles;
       cpputil::TrimSingleFromFragEnd(seg.front(), opt.fragend_dist_filter);
     }
@@ -483,15 +486,27 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
     string chrname = seg.front().ChrName(bamheader);
     // get denominator
     std::pair<int, int> q0den(0, 0);
-    auto den = NumEffBases(seg, gr, ref, chrname, blacklist, errorstat, opt.bqual_min, q0den, true, opt.count_read, false);
+    auto den = CountDenom(seg, gr, ref, chrname, blacklist, errorstat, opt.bqual_min, q0den, true, opt.count_read, false);
     int r1_den = den.first;
     int r2_den = den.second;
+    if (not opt.count_read and r1_den != r2_den) {
+      std::cerr << seg[0] << std::endl;
+      std::cerr << seg[1] << std::endl;
+      std::cerr << "r1_den" << r1_den << std::endl;
+      std::cerr << "r2_den" << r2_den << std::endl;
+    }
 
     std::string aux_output = std::to_string(frag_numN) + "\t" + std::to_string(nqpass) +
         "\t" + std::to_string(olen) + "\t" + std::to_string(abs(seg[0].InsertSize()));
-    errorstat.neval += r1_den + r2_den;
+    if (opt.count_read) {
+      errorstat.neval += r1_den + r2_den;
+    } else {
+      errorstat.neval += r1_den;
+    }
     errorstat.qcut_neval[0].first += q0den.first;
     errorstat.qcut_neval[0].second += q0den.second;
+    errorstat.qcut_neval[opt.bqual_min].first += r1_den;
+    errorstat.qcut_neval[opt.bqual_min].second += r2_den;
 
     if (!opt.cycle_level_stat.empty()) {
       CycleBaseCount(seg, gr, errorstat);
@@ -521,13 +536,9 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
       }
     }
 
-    // Currenlty, always assume the variants are concordance between R1 and R2
-    //TODO: if count_read == true, allow single variants in the overhang regions.
     std::vector<std::vector<cpputil::Variant>> refined_vars;
     refined_vars.reserve(var_vars.size());
-    //Consolidate SNPs which has too purposes:
-    // 1. change the variant quality of both reads to the lowest one so that they can be filtered of keep as a whole
-    // 2. break doublets and etc. if not all bases are satisfying baseq cutoff.
+    //Consolidate SNPs to break doublets and etc if not all bases baseq filter.
     for (const auto& it: var_vars) {
       if (it.first.isIndel()) {
         refined_vars.push_back(it.second);
@@ -543,7 +554,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
           }
         }
       } else {
-        auto vars = cpputil::snppair_consolidate(it.second[0], it.second[1], opt.bqual_min);
+        auto vars = cpputil::ConsolidateSNVpair(it.second[0], it.second[1], opt.bqual_min);
         refined_vars.insert(refined_vars.end(), vars.begin(), vars.end());
       }
     }
@@ -565,7 +576,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
       if (bcf_reader2.IsOpen() && not found) {
         int maskbyvcf1 = n_true_mut(real_muts);
         found = cpputil::search_var_in_database(bcf_reader2, var, known, "SEC_VCF", real_muts, true, opt.bqual_min, opt.all_mutant_frags);
-        if (var.Type() == "SNV" and var.var_qual >= opt.bqual_min)
+        if (var.Type() == "SNV" and var.var_qual >= opt.bqual_min * var.read_count)
           errorstat.nerror_masked_by_vcf2 += (n_true_mut(real_muts) - maskbyvcf1) * var.read_count;
       }
       if (mafr.IsOpen() && not found) {
@@ -573,6 +584,38 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
       }
       if (not found) { // error site
         // mutant_families.txt
+        // alignment filter
+        auto seq = cpputil::MergePair(seg, orig_seqs, true, 0, dummy_quals);
+        mem_alnreg_v ar;
+        ar = mem_align1(bwa.GetMemOpt(), bwa.GetIndex()->bwt, bwa.GetIndex()->bns, bwa.GetIndex()->pac,
+                        seq.first.length(), seq.first.data());
+        int primary_score = 0, sec_as=0;
+        for (size_t idx = 0; idx < ar.n; ++idx) {
+          if (ar.a[idx].secondary < 0) {
+            primary_score = ar.a[idx].score;
+            break;
+          }
+        }
+        size_t idx = 0;
+        for (;idx < ar.n; ++idx) {
+          if (ar.a[idx].secondary >= 0 && ar.a[idx].score >= primary_score * opt.max_frac_prim_AS) {
+            sec_as = ar.a[idx].score;
+            break;
+          }
+        }
+        if (ar.n >= 100 || idx < ar.n) {
+          ++errorstat.AS_filter;
+          continue;
+          //std::cerr << seg[0].Qname() << "\t" << primary_score <<"\t" << sec_as <<"\t" << ar.n << "\n";
+          //                      SeqLib::BamRecordVector bams;
+          //                      bwa.AlignSequence(seq.first, seg[0].Qname(), bams, false,  0.01, 10);
+          //                      for (unsigned bb = 0; bb < bams.size(); ++bb) {
+          //                        std::cerr << bams[bb] << std::endl;
+          //                      }
+
+        }
+
+        //pass alignment filters
         int nerr = 0, q0nerr = 0;
         std::vector<cpputil::Variant> avars;
         if (n_true_mut(real_muts) > 0) { // partially wrong
@@ -585,82 +628,100 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
         } else { // fully wrong
           avars.push_back(var);
         }
+
         for (unsigned ai = 0; ai < avars.size(); ++ai) {
-          if (avars[ai].isIndel() && readpair_var.size() == 2) {
-            //ferr << avars[ai] << '\t' << aux_output <<'\n';
-            int r1varend =  avars[ai].Type() == "INS" ? avars[ai].r1_start + avars[ai].alt_seq.length() : avars[ai].r1_start + 1;
-            int r2varend =  avars[ai].Type() == "INS" ? avars[ai].r2_start + avars[ai].alt_seq.length() : avars[ai].r2_start + 1;
-            auto r1flank_f = orig_seqs[0].substr(std::max(avars[ai].r1_start - opt.indel_anchor_size + 1, 0), opt.indel_anchor_size);
-            auto r2flank_f = orig_seqs[1].substr(std::max(avars[ai].r2_start - opt.indel_anchor_size + 1, 0), opt.indel_anchor_size);
-            auto r1flank_b = orig_seqs[0].substr(r1varend, opt.indel_anchor_size);
-            auto r2flank_b = orig_seqs[1].substr(r2varend, opt.indel_anchor_size);
-//            std::cerr << avars[ai] << ". R1 start: " << avars[ai].r1_start << ", R2 start: " << avars[ai].r2_start <<
-//              ". R1 Flank seq: " << r1flank_f << ", " << r1flank_b << ". R2 Flank Seq " << r2flank_f << ", " << r2flank_b << std::endl;
-          } else {
-            if (avars[ai].var_qual < opt.bqual_min ||
-                (not opt.count_read && seg.size() != 1 && readpair_var.size() != 2 )) {
-              q0nerr += avars[ai].read_count * avars[ai].alt_seq.size();
+          int germ_support = 0, germ_depth = std::numeric_limits<int>::max();
+          if (avars[ai].isIndel() ) {// INDEL
+            if (avars[ai].contig_seq.find('N') != std::string::npos) {
               continue;
             }
-            int germ_support = 0, germ_cov = std::numeric_limits<int>::max();
+
             if (opt.germline_bam.size() > 1) {
-              germ_cov = cpputil::ScanAllele(&pileup, avars[ai].contig, avars[ai].contig_start, avars[ai].alt_seq[0], true, germ_support);
+              int cnt_found = 0;
+              int germ_depth = cpputil::ScanIndel(&pileup, avars[ai].contig, avars[ai].contig_start,
+                                                  (int) avars[ai].alt_seq.size() - (int) avars[ai].contig_seq.size(),
+                                                  avars[ai].alt_seq, true, germ_support);
+              if (germ_depth < opt.germline_mindepth) {
+                ++errorstat.low_germ_depth;
+                continue;
+              }
+
+              if (germ_support > 0) {
+                ++errorstat.seen_in_germ;
+                continue;
+              }
             }
-            if (germ_cov < opt.germline_mindepth) {
-              errorstat.low_germ_depth += avars[ai].read_count;
+            if (!opt.count_read && readpair_var.size() == 1) {
+              continue;
+            }
+            else if (readpair_var.size() == 2) {
+              int r1varend =  avars[ai].Type() == "INS" ? avars[ai].r1_start + avars[ai].alt_seq.length() : avars[ai].r1_start + 1;
+              int r2varend =  avars[ai].Type() == "INS" ? avars[ai].r2_start + avars[ai].alt_seq.length() : avars[ai].r2_start + 1;
+              auto r1flank_f = orig_seqs[0].substr(std::max(avars[ai].r1_start - opt.indel_anchor_size + 1, 0), opt.indel_anchor_size);
+              auto r2flank_f = orig_seqs[1].substr(std::max(avars[ai].r2_start - opt.indel_anchor_size + 1, 0), opt.indel_anchor_size);
+              auto r1flank_b = orig_seqs[0].substr(r1varend, opt.indel_anchor_size);
+              auto r2flank_b = orig_seqs[1].substr(r2varend, opt.indel_anchor_size);
+
+              auto r1_pre_baseq = orig_qualities[0].substr(avars[ai].r1_start, 1);
+              auto r2_pre_baseq = orig_qualities[1].substr(avars[ai].r2_start, 1);
+              auto r1_suc_baseq = orig_qualities[0].substr(r1varend, 1);
+              auto r2_suc_baseq = orig_qualities[1].substr(r2varend, 1);
+
+              unsigned char phred = '5'; // '?' phred 30 , '5' 20
+              if (r1_pre_baseq[0] < phred or r2_pre_baseq[0] < phred or r1_suc_baseq[0] < phred or r2_suc_baseq[0] < phred)  {
+//                std::cerr << avars[ai] << ". R1 start: " << avars[ai].r1_start << ", R2 start: " << avars[ai].r2_start <<
+//                ". R1 Flank baseq " << r1_pre_baseq << ", " << r1_suc_baseq << ". R2 Flank Seq " << r2_pre_baseq << ", " << r2_suc_baseq << std::endl;
+                ++errorstat.nindel_filtered_ajabaseq;
+                continue;
+              }
+              if (r1flank_f.find('N') != std::string::npos or r2flank_f.find('N') != std::string::npos or
+              r1flank_b.find('N') != std::string::npos or r2flank_b.find('N') != std::string::npos) {
+//                std::cerr << avars[ai] << ". R1 start: " << avars[ai].r1_start << ", R2 start: " << avars[ai].r2_start <<
+//                ". R1 flank seq: " << r1flank_f << ", " << r1flank_b << ". R2 Flank Seq " << r2flank_f << ", " << r2flank_b << std::endl;
+                ++errorstat.nindel_filtered_ajaN;
+                continue;
+              }
+            }
+            ++errorstat.nindel_error;
+            errorstat.indel_nbase_error += abs((int) avars[ai].contig_seq.length() - (int) avars[ai].alt_seq.length());
+            ferr << avars[ai] << '\t' << aux_output <<'\n';
+          } else { // SNV
+            if (opt.germline_bam.size() > 1) {
+              germ_depth = cpputil::ScanAllele(&pileup, avars[ai].contig, avars[ai].contig_start, avars[ai].alt_seq[0], true, germ_support);
+            }
+            if (germ_depth < opt.germline_mindepth) {
+              ++errorstat.low_germ_depth;
             } else if (germ_support > 0) {
-              errorstat.seen_in_germ += avars[ai].read_count;
+              ++errorstat.seen_in_germ;
             } else {
-              if (not opt.allow_indel_near_snv && cpputil::IndelLen(seg.front())> 0) {
-                errorstat.mismatch_filtered_by_indel += avars[ai].read_count;
+              if (avars[ai].var_qual < opt.bqual_min * avars[ai].read_count ||
+                  (not opt.count_read && readpair_var.size() != 2 )) {
+                q0nerr += avars[ai].alt_seq.size();
+                continue;
+              }
+              if (not opt.allow_indel_near_snv && (cpputil::IndelLen(seg.front())> 0 ||
+                          (seg.size() == 2 && cpputil::IndelLen(seg.back()) > 0))) {
+                ++errorstat.mismatch_filtered_by_indel;
               } else {
                 if (avars[ai].MutType() == "T>G" and (float) frag_numN > olen * opt.max_N_frac_T2G) {
-                  errorstat.lowconf_t2g += avars[ai].read_count;
+                  ++errorstat.lowconf_t2g;
                 } else {
-                  // alignment filter
-                  auto seq = cpputil::MergePair(seg, orig_seqs, true, 0, orig_quals);
-                  mem_alnreg_v ar;
-                  ar = mem_align1(bwa.GetMemOpt(), bwa.GetIndex()->bwt, bwa.GetIndex()->bns, bwa.GetIndex()->pac,
-                                  seq.first.length(), seq.first.data());
-                  int primary_score = 0, sec_as=0;
-                  for (size_t idx = 0; idx < ar.n; ++idx) {
-                    if (ar.a[idx].secondary < 0) {
-                      primary_score = ar.a[idx].score;
-                      break;
-                    }
-                  }
-                  size_t idx = 0;
-                  for (;idx < ar.n; ++idx) {
-                    if (ar.a[idx].secondary >= 0 && ar.a[idx].score >= primary_score * opt.max_frac_prim_AS) {
-                    //if (ar.a[idx].secondary >= 0 && ar.a[idx].score >= primary_score - 50) {
-                      sec_as = ar.a[idx].score;
-                      break;
-                    }
-                  }
-                  if (ar.n >= 100 || idx < ar.n) {
-                    errorstat.AS_filter += avars[ai].read_count;
-                    //std::cerr << seg[0].Qname() << "\t" << primary_score <<"\t" << sec_as <<"\t" << ar.n << "\n";
-//                      SeqLib::BamRecordVector bams;
-//                      bwa.AlignSequence(seq.first, seg[0].Qname(), bams, false,  0.01, 10);
-//                      for (unsigned bb = 0; bb < bams.size(); ++bb) {
-//                        std::cerr << bams[bb] << std::endl;
-//                      }
-
-                  } else {
-                    nerr += avars[ai].read_count * avars[ai].alt_seq.size();
-                    ferr << avars[ai] << '\t' << aux_output <<'\n';
-                    // look at strand bias (not for CODEC)
+                  nerr += avars[ai].alt_seq.size();
+                  q0nerr += avars[ai].alt_seq.size();
+                  ferr << avars[ai] << '\t' << aux_output <<'\n';
+                  // look at strand bias (not for CODEC)
 //                    std::cerr << readpair_var[0] << "\t" << seg[0].FirstFlag() << "\t" << seg[0].ReverseFlag() << '\n';
 //                    std::cerr << readpair_var[1] << "\t" << seg[1].FirstFlag() << "\t" << seg[1].ReverseFlag() << '\n';
-                    q0nerr += avars[ai].read_count * avars[ai].alt_seq.size();
-                  }
                 }
               }
             }
           }
+        }// end for
+        if (opt.count_read) {
+          errorstat.nsnv_error += nerr * var.read_count;
+        } else {
+          errorstat.nsnv_error += nerr;
         }
-
-        errorstat.nerror += nerr;
         if (var.read_count == 2) {
           errorstat.qcut_nerrors[0].first += q0nerr;
           errorstat.qcut_nerrors[0].second += q0nerr;
@@ -674,7 +735,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
         // other error profiles
         if (var.Type() == "SNV") {
           if (!opt.read_level_stat.empty()) {
-            if (var.var_qual >= opt.bqual_min && (seg.size() == 1 || readpair_var.size() == 2)) {
+            if (var.var_qual >= opt.bqual_min * var.read_count && (seg.size() == 1 || readpair_var.size() == 2)) {
               if (var.read_count == 2) {
                 r1_nerror += nerr;
                 r2_nerror += nerr;
@@ -689,7 +750,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
           if (!opt.cycle_level_stat.empty()) {
             int tpos = var.alt_start < 0 ?  abs(var.alt_start + 1): var.alt_start;
             var.first_of_pair ? errorstat.R1_q0_error[tpos] += nerr : errorstat.R2_q0_error[tpos] += nerr;
-            if (var.var_qual >= 30) {
+            if (var.var_qual >= opt.bqual_min * var.read_count) {
               var.first_of_pair ? errorstat.R1_q30_error[tpos] += nerr: errorstat.R2_q30_error[tpos] += nerr;
             }
           }
@@ -779,7 +840,7 @@ int codec_accuracy(int argc, char ** argv) {
     mafr.Open(opt.maf_file);
   }
   const int L = 250;
-  auto errorstat = cpputil::ErrorStat(L);
+  auto errorstat = cpputil::ErrorStat(L, opt.bqual_min);
   if (opt.detail_qscore_prof) {
     errorstat = cpputil::ErrorStat({0,10,20,30}, L);
   }
@@ -852,9 +913,13 @@ int codec_accuracy(int argc, char ** argv) {
                                      "n_C_eval",
                                      "n_G_eval",
                                      "n_T_eval",
-                                     "n_errors",
-                                     "erate",
-                                     "n_errors_masked_by_vcf2",
+                                     "n_snv",
+                                     "snv_rate",
+                                     "n_indel",
+                                     "indel_rate",
+                                     "n_indel_bases",
+                                     "indel_bases_rate",
+                                     "n_snv_masked_by_vcf2",
                                      "n_totalpairs",
                                      "n_pass_filter_pair_seg",
                                      "n_pass_filter_single_seg",
@@ -866,36 +931,42 @@ int codec_accuracy(int argc, char ** argv) {
                                      "n_filtered_largefrag",
                                      "n_filtered_edit",
                                      "n_filtered_clustered",
-                                     "nmut_germ_lowdepth",
-                                     "nmut_germ_seen",
-                                     "nmut_mismatch_filtered_by_indel",
-                                     "nmut_t2g_low_conf",
-                                     "nmut_AS_filtered",
-                                     "q60_rate"};
+                                     "n_AS_filtered",
+                                     "nsnv_germ_lowdepth",
+                                     "nsnv_germ_seen",
+                                     "nsnv_mismatch_filtered_by_indel",
+                                     "nsnv_t2g_low_conf",
+                                     "nindel_filtered_by_adjbaeq",
+                                     "nindel_filtered_by_adjN",
+                                     "qpass_rate"};
 
   //for (const auto& duo : errorstat.qcut_nerrors) {
-    header.push_back("all_n_bases_eval" );
-    header.push_back("all_n_errors" );
-    header.push_back("all_erate" );
-    header.push_back("all_R1_n_bases_eval" );
-    header.push_back("all_R1_n_errors" );
-    header.push_back("all_R1_erate" );
-    header.push_back("all_R2_n_bases_eval" );
-    header.push_back("all_R2_n_errors" );
-    header.push_back("all_R2_erate" );
+//    header.push_back("all_n_bases_eval" );
+//    header.push_back("all_n_errors" );
+//    header.push_back("all_erate" );
+    header.push_back("q0_R1_n_bases_eval" );
+    header.push_back("q0_R1_n_errors" );
+    header.push_back("q0_R1_erate" );
+    header.push_back("q0_R2_n_bases_eval" );
+    header.push_back("q0_R2_n_errors" );
+    header.push_back("q0_R2_erate" );
   //}
-
+  std::string fac = opt.count_read ? "1" : "2";
   stat << cpputil::join(header, "\t") << std::endl;
-  stat << opt.bqual_min << '\t'
+  stat << std::to_string(opt.bqual_min) + "x" + fac  << '\t'
        << opt.fragend_dist_filter << '\t'
        << errorstat.neval << '\t'
       << errorstat.base_counter['A'] << '\t'
       << errorstat.base_counter['C'] << '\t'
       << errorstat.base_counter['G'] << '\t'
       << errorstat.base_counter['T'] << '\t'
-      << errorstat.nerror << '\t'
-       << (float) errorstat.nerror / errorstat.neval << '\t'
-       << errorstat.nerror_masked_by_vcf2 << '\t'
+      << errorstat.nsnv_error << '\t'
+       << (float) errorstat.nsnv_error / errorstat.neval << '\t'
+      << errorstat.nindel_error << '\t'
+      << (float) errorstat.nindel_error / errorstat.neval << '\t'
+      << errorstat.indel_nbase_error << '\t'
+      << (float) errorstat.indel_nbase_error / errorstat.neval << '\t'
+      << errorstat.nerror_masked_by_vcf2 << '\t'
        << readpair_cnt.NumAdded() << '\t'
        << errorstat.n_pass_filter_pairs << '\t'
        << errorstat.n_pass_filter_singles << '\t'
@@ -907,12 +978,15 @@ int codec_accuracy(int argc, char ** argv) {
        << errorstat.n_filtered_largefrag << '\t'
        << errorstat.n_filtered_edit << '\t'
       << errorstat.n_filtered_clustered << '\t'
-       << errorstat.low_germ_depth << '\t'
+      << errorstat.AS_filter << '\t'
+      << errorstat.low_germ_depth << '\t'
        << errorstat.seen_in_germ << '\t'
        << errorstat.mismatch_filtered_by_indel << '\t'
        << errorstat.lowconf_t2g << '\t'
-       << errorstat.AS_filter << '\t'
-       << (float) errorstat.neval / (errorstat.qcut_neval[0].first + errorstat.qcut_neval[0].second)  << '\t';
+       << errorstat.nindel_filtered_ajabaseq << '\t'
+      << errorstat.nindel_filtered_ajaN << '\t'
+       << (float) (errorstat.qcut_neval[opt.bqual_min].first +  errorstat.qcut_neval[opt.bqual_min].second) /
+       (errorstat.qcut_neval[0].first + errorstat.qcut_neval[0].second)  << '\t';
 
   int ii = 0;
   for (const auto& qcut : errorstat.cutoffs) {
@@ -921,9 +995,9 @@ int codec_accuracy(int argc, char ** argv) {
     int64_t r2_den = errorstat.qcut_neval[qcut].second;
     int64_t r1_num = errorstat.qcut_nerrors[qcut].first;
     int64_t r2_num = errorstat.qcut_nerrors[qcut].second;
-    stat << r1_den + r2_den  << '\t';
-    stat << r1_num + r2_num << '\t';
-    stat << (float) (r1_num + r2_num) / (r1_den + r2_den) << '\t';
+//    stat << r1_den + r2_den  << '\t';
+//    stat << r1_num + r2_num << '\t';
+//    stat << (float) (r1_num + r2_num) / (r1_den + r2_den) << '\t';
     stat << r1_den << '\t';
     stat << r1_num << '\t';
     stat << (float) r1_num / r1_den<< '\t';
