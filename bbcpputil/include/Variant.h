@@ -35,7 +35,7 @@ struct Variant {
   int32_t contig_start;
   std::string contig_seq;
   std::string read_id;
-  int32_t alt_start;
+  int32_t alt_start; // in_situ_start , in sequencing direction
   std::string alt_seq;
   std::string alt_qual;
   int family_size;
@@ -45,7 +45,6 @@ struct Variant {
   int32_t read_count;
   int32_t dist_to_fragend;
   int32_t r1_start, r2_start;
-  std::string alt_qual_str;
 
   Variant(std::string ctg,
           int32_t cstart,
@@ -72,8 +71,7 @@ struct Variant {
       read_count(1),
       dist_to_fragend(-1),
       r1_start(-1),
-      r2_start(-1),
-      alt_qual_str("")
+      r2_start(-1)
   {
     if (Type() == "SNV") {
       int minqual = std::numeric_limits<int>::max();
@@ -81,7 +79,6 @@ struct Variant {
         if ((int)x < minqual) minqual = x;
       }
       var_qual = minqual - 33;
-      alt_qual_str = std::to_string(var_qual);
     }
   }
 
@@ -151,6 +148,7 @@ struct Variant {
     if (other.contig != this->contig) return false;
     if (other.contig_start != this->contig_start) return false;
     if (other.alt_seq != this->alt_seq) return false;
+    if (other.contig_seq != this->contig_seq) return false;
     return true;
   }
 
@@ -163,7 +161,10 @@ struct Variant {
     else if (other.contig == this->contig) {
       if (other.contig_start > this->contig_start) return false;
       else if (other.contig_start == this->contig_start) {
-        if (other.alt_seq >= this->alt_seq) return false;
+        if (other.alt_seq > this->alt_seq) return false;
+        else if (other.alt_seq == this->alt_seq) {
+          if (other.contig_seq >= this->contig_seq) return false;
+        }
       }
     }
     return true;
@@ -184,7 +185,7 @@ Stream &operator<<(Stream &os, const Variant &v) {
                     v.alt_seq + "\t" +
                     v.Type() + "\t" +
                     std::to_string(fs) + "\t" +
-                    v.alt_qual_str + "\t" +
+                    std::to_string(v.var_qual) + "\t" +
                     std::to_string(v.read_count) + "\t" +
                     v.read_id + "\t" +
                     std::to_string(v.family_size);
@@ -206,6 +207,8 @@ std::vector<Variant> var_atomize(const Variant& var) {
                        var.family_size,
                        var.first_of_pair,
                        var.rev_strand);
+      res.back().dist_to_fragend = var.dist_to_fragend;
+      res.back().var_qual = var.var_qual;
       res.back().read_count = var.read_count;
       res.back().r1_start = var.r1_start;
       res.back().r2_start = var.r2_start;
@@ -218,15 +221,18 @@ std::vector<Variant> var_atomize(const Variant& var) {
 
 Variant squash_vars(const std::vector<Variant>& vars) {
   //squash varaints from the two reads of a read-pair into one
-  if (vars.size() == 1) return vars[0];
+  Variant ret = vars[0];
+  if (vars.size() == 1) {
+    ret.dist_to_fragend = abs(vars[0].alt_start);
+    return ret;
+  }
   assert(vars.size() == 2);
   assert(vars[0].contig == vars[1].contig &&
           vars[0].contig_start == vars[1].contig_start &&
           vars[0].read_id == vars[1].read_id &&
           vars[0].alt_seq == vars[1].alt_seq);
-  Variant ret = vars[0];
+  ret.var_qual += vars[1].var_qual;
   ret.read_count = 2;
-  ret.alt_qual_str = vars[0].alt_qual_str + "," + vars[1].alt_qual_str;
   ret.dist_to_fragend = std::min(abs(vars[0].alt_start), abs(vars[1].alt_start));
   if (vars[0].first_of_pair) {
     ret.r1_start = vars[0].r1_start;
@@ -238,37 +244,20 @@ Variant squash_vars(const std::vector<Variant>& vars) {
   return ret;
 }
 
-std::vector<Variant> breakmnv(const Variant& var, int minq) {
-  assert(var.isMNV());
-}
-
-std::vector<std::vector<Variant>> snppair_consolidate(const Variant& var1, const Variant& var2, int minq) {
+std::vector<std::vector<Variant>> ConsolidateSNVpair(const Variant& var1, const Variant& var2, int minbq) {
   //var1 and var2 belongs to read1 and read2 respectively
-  //filter or keep as a pair
   //break MNV to SNV if need
   assert(var1 == var2);
   assert(var1.Type() == "SNV");
   std::vector<std::vector<Variant>> res;
-  if (var1.var_qual >= minq && var2.var_qual >= minq) {
-    res.push_back({var1, var2});
-  } else {
-    if (var1.isMNV()) {
-      auto var1_atoms = var_atomize(var1);
-      auto var2_atoms = var_atomize(var2);
-      for (unsigned i = 0; i < var1.alt_seq.size(); ++i) {
-        if (var1_atoms[i].var_qual < minq || var2_atoms[i].var_qual < minq) {
-          var1_atoms[i].var_qual = std::min(var1_atoms[i].var_qual, var2_atoms[i].var_qual);
-          var2_atoms[i].var_qual = std::min(var1_atoms[i].var_qual, var2_atoms[i].var_qual);
-        }
-        res.push_back({var1_atoms[i], var2_atoms[i]});
-      }
-    } else {
-      auto cpvar1 = var1;
-      auto cpvar2 = var2;
-      cpvar1.var_qual = std::min(var1.var_qual, var2.var_qual);
-      cpvar2.var_qual = std::min(var1.var_qual, var2.var_qual);
-      res.push_back({cpvar1, cpvar2});
+  if (var1.isMNV() and (var1.var_qual < minbq or var2.var_qual < minbq)) {
+    auto var1_atoms = var_atomize(var1);
+    auto var2_atoms = var_atomize(var2);
+    for (unsigned i = 0; i < var1.alt_seq.size(); ++i) {
+      res.push_back({var1_atoms[i], var2_atoms[i]});
     }
+  } else {
+    res.push_back({var1, var2});
   }
   return res;
 }

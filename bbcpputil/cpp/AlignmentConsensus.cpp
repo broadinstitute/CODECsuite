@@ -11,7 +11,6 @@ std::string GetConsensusTemplate(const Segments& segs, int32_t& ref_most_left) {
   /*
    *  '.' : uninitialized
    *  '+' : insertion
-   *  '-' : deletion
    */
   ref_most_left = std::numeric_limits<int32_t>::max();
   int32_t ref_most_right = 0;
@@ -93,6 +92,7 @@ std::pair<std::string, std::string>
 std::pair<std::string, std::string> MergePair(const Segments &segs, const std::vector<std::string>& seqs,
     bool trim_overhang, int qcutoff, std::vector<std::string>& out_quals) {
   //seqs should hold the fastq seq for segs. They could be same length but different seqs
+  //not to change indel
   assert (segs.size() == 2);
   out_quals.resize(segs.size());
   int ref_most_left;
@@ -124,16 +124,30 @@ std::pair<std::string, std::string> MergePair(const Segments &segs, const std::v
     }
     if (dna_pileup[0][jj] == '.' or dna_pileup[1][jj] == '.') { // overhang
       if (not trim_overhang) {
-        if (dna_pileup[0][jj] != '.' and dna_pileup[1][jj] == '.') {
+        if (dna_pileup[0][jj] != '.' and dna_pileup[0][jj] != '-' and dna_pileup[1][jj] == '.') {
           consns_seq1[jj] = dna_pileup[0][jj];
           out_quals[0][jj] = qual_pileup[0][jj];
-        } else if (dna_pileup[0][jj] == '.' and dna_pileup[1][jj] != '.') {
+        } else if (dna_pileup[0][jj] == '.' and dna_pileup[1][jj] != '.' and dna_pileup[1][jj] != '-') {
           consns_seq2[jj] = dna_pileup[1][jj];
           out_quals[1][jj] = qual_pileup[1][jj];
         }
       }
     } else {
       if (dna_pileup[0][jj] != dna_pileup[1][jj]) {
+        assert(dna_pileup[0][jj] != '-' or dna_pileup[1][jj] != '+');
+        assert(dna_pileup[0][jj] != '+' or dna_pileup[1][jj] != '-');
+        if (dna_pileup[0][jj] == '-' or dna_pileup[0][jj] == '+') {
+          consns_seq2[jj] = dna_pileup[1][jj];
+        }
+        else if (dna_pileup[1][jj] == '-' or dna_pileup[1][jj] == '+') {
+          consns_seq1[jj] = dna_pileup[0][jj];
+        }
+        else {
+          consns_seq1[jj] = 'N';
+          consns_seq2[jj] = 'N';
+        }
+#if 0
+    // DO CONSENSUS for INDEL
         if (std::min(dna_pileup[0][jj], dna_pileup[1][jj]) == '-') {
           // the consensus of del and non-del is N
           //consns_seq[jj] = std::max(dna_pileup[0][jj], dna_pileup[1][jj]);
@@ -144,9 +158,13 @@ std::pair<std::string, std::string> MergePair(const Segments &segs, const std::v
           consns_seq1[jj] = 'N';
           consns_seq2[jj] = 'N';
         }
+#endif
+
       } else if (dna_pileup[0][jj] >= 'A') {
         consns_seq1[jj] = dna_pileup[0][jj];
         consns_seq2[jj] = dna_pileup[0][jj];
+      } else if (dna_pileup[0][jj] == '+') {
+        assert(false);
       }
     }
     out_quals[0][jj] = consns_seq1[jj] == NUL ? NUL : qual_pileup[0][jj];
