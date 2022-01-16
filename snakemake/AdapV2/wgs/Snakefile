@@ -64,7 +64,7 @@ rule CDSErrorMetrics:
           germ_vcf = lambda wildcards : sample_to_vcf.loc[wildcards.index]['germline_vcf'],
           germ_bam = lambda wildcards : sample_to_germbam.loc[wildcards.index]['germline_bam'],
     resources:
-             mem = 8,
+             mem = 16,
              runtime = 96
     shell:
          """
@@ -76,7 +76,7 @@ rule CDSErrorMetrics:
                 -q 30 \
                 -d 12 \
                 -V {params.germ_vcf},{params.dbsnp} \
-                -x 2 \
+                -x 4 \
                 -c 3 \
                 -5 \
                 -g 30 \
@@ -84,7 +84,7 @@ rule CDSErrorMetrics:
                 -Q 0.7 \
                 -N 0.03 \
                 -B 0.5 \
-                -Y 20 \
+                -Y 10 \
                 -a {output.accu} \
                 -e {output.error} \
                 -C {output.context}

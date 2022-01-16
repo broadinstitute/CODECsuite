@@ -11,9 +11,9 @@ UMITOOLS = 'umi_tools'
 rule all:
     input:
          expand(DETECT_DIR + "/{index}.detect_fingerprint.txt", index=sample_names),
-         expand("miredas/{index}.cds_consensus.mol_consensus_error_metrics.txt", index=sample_names),
+         #expand("miredas/{index}.cds_consensus.mol_consensus_error_metrics.txt", index=sample_names),
          #expand(Metrics_OUT + "/{index}.duplex_yield_metrics.txt",index=sample_names),
-         expand("accu/{index}.error_metrics.txt", index=sample_names),
+         #expand("accu/{index}.error_metrics.txt", index=sample_names),
           #expand(Metrics_OUT + "/{index}.raw.hs_metrics.txt", index=sample_names),
 
 
@@ -44,7 +44,7 @@ rule RefineUmiGroup:
     output:
          bam = temp("filtered/{index}.cds_consensus.mol_consensus.aligned.umi_tools.bam")
     resources:
-         mem = 16,
+         mem = 8,
          runtime = 24
     shell:
         """
@@ -55,6 +55,7 @@ rule RefineUmiGroup:
                   --umi-tag=RX \
                   --umi-tag-delimiter=- \
                   --extract-umi-method=tag \
+                  --edit-distance-threshold=2 \
                   --output-bam \
                   --paired \
         """
@@ -70,7 +71,7 @@ rule FilterMolecularConsensusReads:
         runtime = 24
     shell:
         """
-        {FILTER} -b {input.bam} | samtools sort - -o {output.bam} && samtools index {output.bam}  
+        {FILTER} -b {input.bam} -f 2 | samtools sort - -o {output.bam} && samtools index {output.bam}  
         """
 
 rule CDSErrorMetrics:
