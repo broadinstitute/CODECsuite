@@ -16,7 +16,9 @@ namespace cpputil{
 static int PAD_5 = 5;
 struct ErrorStat {
   int64_t neval = 0;
-  int64_t nerror = 0;
+  int64_t nsnv_error = 0;
+  int64_t nindel_error = 0;
+  int64_t indel_nbase_error = 0;
   int64_t nerror_masked_by_vcf2 = 0;
   int64_t discard_frag_counter = 0;
   int64_t n_pass_filter_pairs = 0;
@@ -43,6 +45,8 @@ struct ErrorStat {
   int n_filtered_largefrag = 0;
   int n_filtered_edit = 0;
   int n_filtered_clustered = 0;
+  int nindel_filtered_ajabaseq = 0;
+  int nindel_filtered_ajaN = 0;
   int mismatch_filtered_by_indel = 0;
   int lowconf_t2g = 0;
   int low_germ_depth = 0;
@@ -50,13 +54,13 @@ struct ErrorStat {
   int AS_filter = 0;
 
   //ErrorStat() = delete;
-  ErrorStat(int L) {
+  ErrorStat(int L, int q) {
     cutoffs = {0};
     //cutoffs = {0, 30};
     qcut_neval[0] = std::make_pair(0,0);
-    //qcut_neval[30] = std::make_pair(0,0);
+    qcut_neval[q] = std::make_pair(0,0);
     qcut_nerrors[0] = std::make_pair(0,0);
-    //qcut_nerrors[30] = std::make_pair(0,0);
+    qcut_nerrors[q] = std::make_pair(0,0);
     Init(L);
   }
   ErrorStat(const vector<int>& qcuts, int L): cutoffs(qcuts){
@@ -111,29 +115,36 @@ std::pair<int,int> CountValidBaseInMatchedBases(const SeqLib::BamRecord &b,
   int res = 0, q0res=0;
   const uint8_t *p = bam_get_seq(b.raw());
   const uint8_t *bq = bam_get_qual(b.raw());
-
+  int cur = 0;
   for (; i < b.raw()->core.n_cigar; ++i) {
     char cigar = bam_cigar_opchr(c[i]);
     if (cigar == 'M' or cigar == 'X' or cigar == '=') {
       for(int ww = 0; ww < bam_cigar_oplen(c[i]); ++ww) {
-        if (ww + readpos <  qstart) continue;
-        if (ww + readpos >= qend) break;
+        cur = ww + readpos;
+        if (cur <  qstart) continue;
+        if (cur >= qend) break;
         if (not site_blacklist.empty() and site_blacklist.find(refpos + ww) != site_blacklist.end()) continue;
-        if ((N_is_valid && bam_seqi(p,ww) == 15) || bam_seqi(p,ww) != 15) ++q0res;
-        if (not bq_blacklist.empty() and bq_blacklist.find(refpos + ww) != bq_blacklist.end()) continue;
-        if (((N_is_valid && bam_seqi(p,ww) == 15) || (bam_seqi(p,ww) != 15)) && bq[ww + readpos] >= minbq) {
-          ++res;
-        }
-        else {
+        if ((N_is_valid && bam_seqi(p,cur) == 15) || bam_seqi(p,cur) != 15) ++q0res;
+        if ((not N_is_valid && bam_seqi(p,cur) == 15) or bq[cur] < minbq) {
           bq_blacklist.insert(refpos + ww);
+          continue;
         }
+        if (not bq_blacklist.empty() and bq_blacklist.find(refpos + ww) != bq_blacklist.end()) continue;
+        ++res;
       }
       readpos += bam_cigar_oplen(c[i]);
       refpos += bam_cigar_oplen(c[i]);
-    } else if(bam_cigar_opchr(c[i]) == 'I') {
+    } else if(cigar == 'I') {
       readpos += bam_cigar_oplen(c[i]);
-    } else if(bam_cigar_oplen(c[i] == 'D')) {
-      refpos += bam_cigar_oplen(c[i]);
+    } else if(cigar == 'D') {
+      if (readpos >= qend) break;
+      int dl = bam_cigar_oplen(c[i]);
+      if (readpos >= qstart) {
+        for (int l = 0; l < dl; ++l ) {
+          bq_blacklist.insert(refpos + l);
+        }
+      }
+      refpos += dl;
     }
   }
   return std::make_pair(res, q0res);
@@ -173,44 +184,50 @@ std::pair<int, int> CountValidBaseAndContextInMatchedBases(const SeqLib::BamReco
   int res = 0, q0res=0;
   const uint8_t *p = bam_get_seq(b.raw());
   const uint8_t *bq = bam_get_qual(b.raw());
-
+  int cur = 0;
   for (; i < b.raw()->core.n_cigar; ++i) {
     char cigar = bam_cigar_opchr(c[i]);
     if (cigar == 'M' or cigar == '=' or cigar == 'X') {
       for(int ww = 0; ww < bam_cigar_oplen(c[i]); ++ww) {
-        if (ww + readpos <  qstart) continue;
-        if (ww + readpos >= qend) break;
+        cur = ww + readpos;
+        if (cur <  qstart) continue;
+        if (cur >= qend) break;
         if (not site_blacklist.empty() and site_blacklist.find(refpos + ww) != site_blacklist.end()) continue;
-        if ((N_is_valid && bam_seqi(p,ww) == 15) || bam_seqi(p,ww) != 15) ++q0res;
-        if (not bq_blacklist.empty() and bq_blacklist.find(refpos + ww) != bq_blacklist.end()) continue;
-        //if (bq[ww + readpos] >= minbq) {
-        if (((N_is_valid && bam_seqi(p,ww) == 15) || bam_seqi(p,ww) != 15) && bq[ww + readpos] >= minbq) {
-          ++res;
-          es.base_counter[toupper(ref[refpos + ww - rstart])]++;
-          if (refpos + ww - rstart -1 >= 0) {
-            auto tri = ref.substr(refpos + ww - rstart - 1, 3);
-            std::transform(tri.begin(), tri.end(), tri.begin(), ::toupper);
-            ++es.triplet_counter[tri];
-          }
-
-          if (bq[readpos + ww + 1] >= minbq &&
-              site_blacklist.find(refpos + ww + 1) == site_blacklist.end() &&
-              bq_blacklist.find(refpos + ww + 1) == bq_blacklist.end()) {
-            auto di = ref.substr(refpos + ww - rstart, 2);
-            std::transform(di.begin(), di.end(), di.begin(), ::toupper);
-            ++es.doublet_counter[di];
-          }
-        }
-        else {
+        if ((N_is_valid && bam_seqi(p,cur) == 15) || bam_seqi(p,cur) != 15) ++q0res;
+        if ((not N_is_valid && bam_seqi(p,cur) == 15) or bq[cur] < minbq) {
           bq_blacklist.insert(refpos + ww);
+          continue;
+        }
+        if (not bq_blacklist.empty() and bq_blacklist.find(refpos + ww) != bq_blacklist.end()) continue;
+        ++res;
+        es.base_counter[toupper(ref[refpos + ww - rstart])]++;
+        if (refpos + ww - rstart -1 >= 0) {
+          auto tri = ref.substr(refpos + ww - rstart - 1, 3);
+          std::transform(tri.begin(), tri.end(), tri.begin(), ::toupper);
+          ++es.triplet_counter[tri];
+        }
+
+        if (bq[cur + 1] >= minbq &&
+            site_blacklist.find(refpos + ww + 1) == site_blacklist.end() &&
+            bq_blacklist.find(refpos + ww + 1) == bq_blacklist.end()) {
+          auto di = ref.substr(refpos + ww - rstart, 2);
+          std::transform(di.begin(), di.end(), di.begin(), ::toupper);
+          ++es.doublet_counter[di];
         }
       }
       readpos += bam_cigar_oplen(c[i]);
       refpos += bam_cigar_oplen(c[i]);
-    } else if(bam_cigar_opchr(c[i]) == 'I') {
+    } else if(cigar == 'I') {
       readpos += bam_cigar_oplen(c[i]);
-    } else if(bam_cigar_oplen(c[i] == 'D')) {
-      refpos += bam_cigar_oplen(c[i]);
+    } else if(cigar == 'D') {
+      if (readpos >= qend) break;
+      int dl = bam_cigar_oplen(c[i]);
+      if (readpos >= qstart) {
+        for (int l = 0; l < dl; ++l ) {
+          bq_blacklist.insert(refpos + l);
+        }
+      }
+      refpos += dl;
     }
   }
   return std::make_pair(res, q0res);

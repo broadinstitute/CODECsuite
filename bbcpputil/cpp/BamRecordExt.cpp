@@ -493,29 +493,51 @@ void MaskBaseBelowMinBq(SeqLib::BamRecord &bam, int32_t mbp) {
   bam.SetQualities(quals, offset);
 }
 
+int NumDelFromEnd(const SeqLib::Cigar& cigar, int dist) {
+  int totallen = 0;
+  int dellen = 0;
+  for(auto &c : cigar) {
+    totallen += c.Length();
+    if (totallen > dist) {
+      if (c.Type() == 'D') {
+        dellen += dist - totallen + c.Length();
+      }
+      break;
+    } else {
+      if (c.Type() == 'D') {
+        dellen += c.Length();
+      }
+    }
+  }
+  return dellen;
+}
+
 void TrimBamFromFragEnd(SeqLib::BamRecord &bam, int32_t mp, int32_t mate_position_end_with_sclip, int32_t end5, int32_t end3) {
   if (end5 == 0 and end3 == 0) return; // no trim
   std::string seq = bam.Sequence();
   std::string qual = bam.Qualities();
   //if (bam.SupplementaryFlag()) return;
   int32_t replace5, replace3;
+  int delfrom5 = NumDelFromEnd(bam.GetCigar(), end5);
+  int delfrom3 = NumDelFromEnd(bam.GetReverseCigar(), end3);
+
   if (!bam.Interchromosomal()
       && bam.PairOrientation() == 0
       && mp != 0
       && mate_position_end_with_sclip != 0)
   { // only FR paired read
     if (bam.ReverseFlag()) {
-      replace5  = std::max(mp + (int32_t) end5 - bam.PositionWithSClips(), 0);
+      replace5  = std::max(mp + (int32_t) end5 - bam.PositionWithSClips() - delfrom5, 0);
       replace5 = std::min(replace5, (int32_t) seq.size());
-      replace3 = std::min(end3, (int32_t) seq.size());
+      replace3 = std::min(end3 - delfrom3, (int32_t) seq.size());
     } else {
-      replace3 = std::max(bam.PositionEndWithSClips() - mate_position_end_with_sclip + end3, 0);
+      replace3 = std::max(bam.PositionEndWithSClips() - mate_position_end_with_sclip + end3 - delfrom3, 0);
       replace3 = std::min((int32_t) seq.size(), replace3);
-      replace5 = std::min(end5, (int32_t) seq.size());
+      replace5 = std::min(end5 - delfrom5, (int32_t) seq.size());
     }
   } else {
-    replace5 = std::min(end5, (int32_t) seq.size());
-    replace3 = std::min(end3, (int32_t) seq.size());
+    replace5 = std::min(end5 - delfrom5, (int32_t) seq.size());
+    replace3 = std::min(end3 - delfrom3, (int32_t) seq.size());
   }
 
   seq.replace(0, replace5, std::string(replace5, 'N'));
