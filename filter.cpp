@@ -45,6 +45,7 @@ struct FilterOptions {
   string outbam;
   int mapq = 10;
   int minbq = 10;
+  int min_family_size = 1;
   bool load_supplementary = false;
   bool load_secondary = false;
 };
@@ -52,6 +53,7 @@ struct FilterOptions {
 
 static struct option  filter_long_options[] = {
     {"bam",                      required_argument,      0,        'b'},
+    {"min_family_size",          required_argument,      0,        'f'},
     {"load_supplementary",       no_argument,            0,        's'},
     {"load_secondary",           no_argument,            0,        '2'},
     {"mapq",                     required_argument ,     0,        'm'},
@@ -60,7 +62,7 @@ static struct option  filter_long_options[] = {
     {0,0,0,0}
 };
 
-const char* filter_short_options = "b:s2m:b:o:";
+const char* filter_short_options = "b:s2m:b:o:f:";
 
 void filter_print_help()
 {
@@ -70,6 +72,7 @@ void filter_print_help()
   std::cerr<< "-b/--bam,                              Input bam [required]\n";
   std::cerr<< "-o/--outbam,                           Output unmapped bamfile [default stdout].\n";
   std::cerr<< "-m/--mapq,                             Min mapping quality [10].\n";
+  std::cerr<< "-f/--min_family_size,                  Minimum number of raw read pairs contributing to the consensus (cD tag in the bam) [1].\n";
   std::cerr<< "-q/--baseq,                            paired baseq calibration. No effect now\n";
   std::cerr<< "-s/--load_supplementary,               Include supplementary alignment [false].\n";
   std::cerr<< "-2/--load_secondary,                   Include secondary alignment [false].\n";
@@ -93,6 +96,9 @@ int filter_parse_options(int argc, char* argv[], FilterOptions& opt) {
         break;
       case 'q':
         opt.minbq = atoi(optarg);
+        break;
+      case 'f':
+        opt.min_family_size = atoi(optarg);
         break;
       case 's':
         opt.load_supplementary = true;
@@ -134,6 +140,7 @@ int codec_filter(int argc, char ** argv) {
   int64_t pass_counter = 0;
   int64_t failed_counter = 0;
   std::string dup;
+  int fsize;
   while (!isf.finished()) {
     std::vector<cpputil::Segments> frag;
     while( (frag= isf.FetchReadNameSorted()).size() > 0) {
@@ -147,9 +154,19 @@ int codec_filter(int argc, char ** argv) {
         if (seg.front().GetZTag("du", dup)) {
           ++failed_counter;
         } else {
-          ++pass_counter;
-          bam_writer.WriteRecord(seg.front());
-          bam_writer.WriteRecord(seg.back());
+          if (seg.front().GetIntTag("cD", fsize)) {
+            if (fsize >= opt.min_family_size) {
+              ++pass_counter;
+              bam_writer.WriteRecord(seg.front());
+              bam_writer.WriteRecord(seg.back());
+            } else {
+              ++failed_counter;
+            }
+          } else {
+            ++pass_counter;
+            bam_writer.WriteRecord(seg.front());
+            bam_writer.WriteRecord(seg.back());
+          }
         }
       }
     }
