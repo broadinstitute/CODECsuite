@@ -89,6 +89,16 @@ std::pair<std::string, std::string>
   return std::make_pair(consns_templ, quality_templ);
 }
 
+std::pair<std::string, std::string> MergePairSeq(const Segments &seg, bool trim_overhang, int qcutoff) {
+  std::vector<std::string> seqs;
+  std::vector<std::string> dummy_quals;
+  for (auto&s : seg) {
+    seqs.push_back(s.Sequence());
+  }
+  auto seq = cpputil::MergePair(seg, seqs, trim_overhang, qcutoff, dummy_quals);
+  return seq;
+}
+
 std::pair<std::string, std::string> MergePair(const Segments &segs, const std::vector<std::string>& seqs,
     bool trim_overhang, int qcutoff, std::vector<std::string>& out_quals) {
   //seqs should hold the fastq seq for segs. They could be same length but different seqs

@@ -35,6 +35,7 @@ std::pair<std::string, std::string>
 std::pair<std::string, std::string> MergePair(const Segments &segs, const std::vector<std::string>& seqs,
                                               bool trim_overhang, int qcutoff, std::vector<std::string>& out_quals);
 
+std::pair<std::string, std::string> MergePairSeq(const Segments &seg, bool trim_overhang, int qcutoff);
 }
 
 #endif //CPPUTIL_INCLUDE_ALIGNMENTCONSENSUS_H_

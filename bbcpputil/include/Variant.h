@@ -69,9 +69,9 @@ struct Variant {
       rev_strand(isrev),
       var_qual(-1),
       read_count(1),
-      dist_to_fragend(-1),
-      r1_start(-1),
-      r2_start(-1)
+      dist_to_fragend(std::numeric_limits<int>::min()),
+      r1_start(std::numeric_limits<int>::min()),
+      r2_start(std::numeric_limits<int>::min())
   {
     if (Type() == "SNV") {
       int minqual = std::numeric_limits<int>::max();

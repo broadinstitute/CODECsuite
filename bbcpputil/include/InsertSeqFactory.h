@@ -33,8 +33,6 @@ class InsertSeqFactory {
   SeqLib::BamReader bam_reader_;
   map<string, InsertSeq> id_inserts_;
   map<string, InsertSeq>::iterator it_;
-  map<std::pair<uint64_t, uint64_t>, std::set<string>> start_end_2_rnames_;
-  map<std::pair<uint64_t, uint64_t>, std::set<string>>::iterator family_it_;
   int min_mapq_;
   bool load_supp_;
   bool load_secondary_;

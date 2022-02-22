@@ -89,8 +89,7 @@ void consensus_print_help()
   std::cerr<< "-t/--trim_overhang,                    When perform paired-end consensus, if true then only do consensus of the overlapped region [false].\n";
   std::cerr<< "-C/--clip3,                            trim the 3'end soft clipping [false].\n";
 //  std::cerr<< "-s/--output_singleend,                 The R1R2 consensus will be output in a single end format [false].\n";
-  std::cerr<< "-p/--pair_min_overlap,                 When using selector, the minimum overlap between the two ends of the pair [1]. "
-              "-1 means two segs complete overlap excluding the soft clip part [-1]. 0 for allowing non-overlapping pair\n";
+  std::cerr<< "-p/--pair_min_overlap,                 When using selector, the minimum overlap between the two ends of the pair [1].\n";
   std::cerr<< "-d/--dirtmp,                           Temporary dir for sorted bam [/tmp]\n";
   std::cerr<< "-T/--thread,                           Number of threads for sort [1]\n";
   std::cerr<< "-i/--allow_nonoverlapping_pair,        Allow output of non-overlaping pairs, usually caused by intermolecular ligation. This will simply print the original reads.  [false]\n";
@@ -173,8 +172,8 @@ int codec_consensus(int argc, char ** argv) {
   if (opt.allow_nonoverlapping_pair) {
     if (opt.pair_min_overlap != 0) {
       std::cerr << "-p/--pair_min_overlap has to be 0 if -i/--allow_nonoverlapping_pair is true\n";
+      return 1;
     }
-    return 1;
   }
 
   char temp[100];

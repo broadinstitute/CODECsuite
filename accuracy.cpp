@@ -64,10 +64,11 @@ struct AccuOptions {
   int max_fraglen = MYINT_MAX;
   int verbose = 0;
   int clustered_mut_cutoff = MYINT_MAX;
-  float max_frac_prim_AS = 0.75;
+  float max_frac_prim_AS = 1.0;
   string germline_bam;
-  int germline_minbq = 10;
-  int germline_minmapq = 20;
+  int germline_minbq = 20;
+  int germline_minalt = 1;
+  int germline_minmapq = 60;
   int germline_mindepth = 5;
   double max_mismatch_frac = 1.0;
   float max_N_frac = 1.0;
@@ -112,6 +113,7 @@ static struct option  accuracy_long_options[] = {
     {"min_germdepth",            required_argument,      0,        'Y'},
     {"max_frac_prim_AS",         required_argument,      0,         'B'},
     {"max_mismatch_frac",        required_argument,      0,        'F'},
+    {"min_germline_alt",         required_argument,      0,        'W'},
     {"filter_5endclip",          no_argument,            0,        '5'},
     {"allow_indel_near_snv",     no_argument,            0,        'I'},
     {"max_N_frac",               required_argument,      0,        'N'},
@@ -132,7 +134,7 @@ static struct option  accuracy_long_options[] = {
     {"cycle_level_stat",         required_argument,      0,        OPT_CYCLE_LEVEL_STAT},
     {0,0,0,0}
 };
-const char* accuracy_short_options = "b:a:m:v:S2us:r:e:q:k:RM:p:d:n:x:V:L:DAC:F:N:5Q:g:G:Ic:B:Y:";
+const char* accuracy_short_options = "b:a:m:v:S2us:r:e:q:k:RM:p:d:n:x:V:L:DAC:F:N:5Q:g:G:Ic:B:Y:W:";
 
 void accuracy_print_help()
 {
@@ -170,14 +172,15 @@ void accuracy_print_help()
   std::cerr<< "-d/--fragend_dist_filter,              Consider a variant if its distance to the fragment end is at least this value [0].\n";
   std::cerr<< "-F/--max_mismatch_frac,                Filter out a read if its mismatch fraction is larger than this value  [1.0].\n";
   std::cerr<< "-N/--max_N_frac,                       Filter out a read if its fraction of of N larger than this value  [1.0].\n";
+  std::cerr<< "-W/--min_germline_alt,                 Minimum number of germline alt reads to be consider as a germline site  [1].\n";
   std::cerr<< "--max_N_frac_T2G,                      Filter out T>G SNV if in its reads, the fraction of of N larger than this value  [1.0].\n";
   std::cerr<< "-5/--filter_5endclip,                  Filter out a read if it has 5'end soft clipping [false].\n";
   std::cerr<< "-I/--allow_indel_near_snv,             allow SNV to pass filter if a indel is found in the same read [false].\n";
   std::cerr<< "-g/--min_fraglen,                      Filter out a read if its fragment length is less than this value [0].\n";
   std::cerr<< "-B/--max_frac_prim_AS,                 Filter out a read if the AS of secondary alignment is within this fraction of the primary alignment [0.75].\n";
-  std::cerr<< "-Y/--min_germdepth,                 Filter out a read if the AS of secondary alignment is within this fraction of the primary alignment [0.75].\n";
+  std::cerr<< "-Y/--min_germdepth,                    Minimum depth in germline bam [5].\n";
   std::cerr<< "-G/--max_fraglen,                      Filter out a read if its fragment length is larger than this value [INT_MAX].\n";
-  std::cerr<< "-p/--pair_min_overlap,                 When using selector, the minimum overlap between the two ends of the pair. -1 for complete overlap, 0 no overlap required [0].\n";
+  //std::cerr<< "-p/--pair_min_overlap,                 When using selector, the minimum overlap between the two ends of the pair. -1 for complete overlap, 0 no overlap required [0].\n";
   std::cerr<< "-R/--count_read,                       When this is true, count #valid bases independently for R1 and R2, including overhang (non overlapping) region of a read pair. [false].\n";
   std::cerr<< "-c/--clustered_mut_cutoff,             Filter out a read if num. mutations are clustered together. [INT_MAX].\n";
   //std::cerr<< "-A/--all_mutant_frags,                 Output all mutant fragments even if not pass failters. Currently only works for known vars [false].\n";
@@ -304,6 +307,9 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
       case 'A':
         opt.all_mutant_frags = true;
         break;
+      case 'W':
+        opt.germline_minalt = atoi(optarg);
+        break;
       default:accuracy_print_help();
         return 1;
     }
@@ -374,7 +380,11 @@ std::pair<int,int> CountDenom(const cpputil::Segments& seg,
     if (seg.front().FirstFlag()) {
       size_t r1_nmask;
       if (count_context) {
-        std::tie(r1, r1q0) = cpputil::CountValidBaseAndContextInMatchedBases(seg.front(), blacklist, chrname, ref, minbq, baseqblack, es, range_front.first, range_front.second, N_is_valid);
+        if (count_overhang) {
+          std::tie(r1, r1q0) = cpputil::CountValidBaseAndContextInMatchedBases(seg.front(), blacklist, chrname, ref, minbq, baseqblack, es, range_front.first, range_front.second, N_is_valid);
+        } else {
+          std::tie(r1, r1q0) = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, baseqblack, range_front.first, range_front.second, N_is_valid);
+        }
         r1_nmask = baseqblack.size();
         if (count_overhang) baseqblack.clear();// when count_overhang is true, treat R1 and R2 independently
         std::tie(r2, r2q0) = cpputil::CountValidBaseAndContextInMatchedBases(seg.back(), blacklist, chrname, ref, minbq, baseqblack, es, range_back.first, range_back.second, N_is_valid);
@@ -448,7 +458,6 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
                     int olen,
                     const SeqLib::BamHeader& bamheader,
                     const SeqLib::RefGenome& ref,
-                    const SeqLib::BWAWrapper& bwa,
                     const SeqLib::GenomicRegion* const gr,
                     const std::set<int> blacklist,
                     const AccuOptions& opt,
@@ -464,7 +473,6 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
   for (auto& seg : frag) { // a fragment may have multiple segs due to supplementary alignments
 
     std::vector<std::string> orig_qualities;
-    std::vector<std::string> dummy_quals;
     std::vector<std::string> orig_seqs;
     //EOF filter
     if (seg.size() == 2) {
@@ -489,12 +497,12 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
     auto den = CountDenom(seg, gr, ref, chrname, blacklist, errorstat, opt.bqual_min, q0den, true, opt.count_read, false);
     int r1_den = den.first;
     int r2_den = den.second;
-    if (not opt.count_read and r1_den != r2_den) {
-      std::cerr << seg[0] << std::endl;
-      std::cerr << seg[1] << std::endl;
-      std::cerr << "r1_den" << r1_den << std::endl;
-      std::cerr << "r2_den" << r2_den << std::endl;
-    }
+//    if (not opt.count_read and r1_den != r2_den) {
+//      std::cerr << seg[0] << std::endl;
+//      std::cerr << seg[1] << std::endl;
+//      std::cerr << "r1_den" << r1_den << std::endl;
+//      std::cerr << "r2_den" << r2_den << std::endl;
+//    }
 
     std::string aux_output = std::to_string(frag_numN) + "\t" + std::to_string(nqpass) +
         "\t" + std::to_string(olen) + "\t" + std::to_string(abs(seg[0].InsertSize()));
@@ -585,35 +593,6 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
       if (not found) { // error site
         // mutant_families.txt
         // alignment filter
-        auto seq = cpputil::MergePair(seg, orig_seqs, true, 0, dummy_quals);
-        mem_alnreg_v ar;
-        ar = mem_align1(bwa.GetMemOpt(), bwa.GetIndex()->bwt, bwa.GetIndex()->bns, bwa.GetIndex()->pac,
-                        seq.first.length(), seq.first.data());
-        int primary_score = 0, sec_as=0;
-        for (size_t idx = 0; idx < ar.n; ++idx) {
-          if (ar.a[idx].secondary < 0) {
-            primary_score = ar.a[idx].score;
-            break;
-          }
-        }
-        size_t idx = 0;
-        for (;idx < ar.n; ++idx) {
-          if (ar.a[idx].secondary >= 0 && ar.a[idx].score >= primary_score * opt.max_frac_prim_AS) {
-            sec_as = ar.a[idx].score;
-            break;
-          }
-        }
-        if (ar.n >= 100 || idx < ar.n) {
-          ++errorstat.AS_filter;
-          continue;
-          //std::cerr << seg[0].Qname() << "\t" << primary_score <<"\t" << sec_as <<"\t" << ar.n << "\n";
-          //                      SeqLib::BamRecordVector bams;
-          //                      bwa.AlignSequence(seq.first, seg[0].Qname(), bams, false,  0.01, 10);
-          //                      for (unsigned bb = 0; bb < bams.size(); ++bb) {
-          //                        std::cerr << bams[bb] << std::endl;
-          //                      }
-
-        }
 
         //pass alignment filters
         int nerr = 0, q0nerr = 0;
@@ -635,6 +614,17 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
             if (avars[ai].contig_seq.find('N') != std::string::npos) {
               continue;
             }
+
+            //INS at first or last base of a read may not be complete
+            if (avars[ai].r1_start == -1 || avars[ai].r2_start == -1) {
+              continue;
+            }
+            if (avars[ai].r1_start + avars[ai].alt_seq.size() == (int) orig_seqs[0].size())
+              continue;
+            if (orig_seqs.size() == 1 && avars[ai].r2_start + avars[ai].alt_seq.size() == (int) orig_seqs[0].size())
+              continue;
+            if (orig_seqs.size() == 2 && avars[ai].r2_start + avars[ai].alt_seq.size() == (int) orig_seqs[1].size())
+              continue;
 
             if (opt.germline_bam.size() > 1) {
               int cnt_found = 0;
@@ -686,33 +676,38 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
             errorstat.indel_nbase_error += abs((int) avars[ai].contig_seq.length() - (int) avars[ai].alt_seq.length());
             ferr << avars[ai] << '\t' << aux_output <<'\n';
           } else { // SNV
+            if (avars[ai].var_qual < opt.bqual_min * avars[ai].read_count ||
+                (not opt.count_read && readpair_var.size() != 2 )) {
+              q0nerr += avars[ai].alt_seq.size();
+              continue;
+            }
             if (opt.germline_bam.size() > 1) {
-              germ_depth = cpputil::ScanAllele(&pileup, avars[ai].contig, avars[ai].contig_start, avars[ai].alt_seq[0], true, germ_support);
+              germ_depth = cpputil::ScanAllele(&pileup, avars[ai].contig, avars[ai].contig_start, avars[ai].alt_seq[0], true, germ_support, opt.germline_minbq);
+            }
+            if (germ_support >= opt.germline_minalt) {
+              ++errorstat.seen_in_germ;
+              //std::cerr << avars[ai] << "\tseen in germ " << germ_support << std::endl;
+              continue;
             }
             if (germ_depth < opt.germline_mindepth) {
               ++errorstat.low_germ_depth;
-            } else if (germ_support > 0) {
-              ++errorstat.seen_in_germ;
+              //std::cerr << avars[ai] << "\tunder covered in germ " << germ_support << std::endl;
+              continue;
+            }
+
+            if (not opt.allow_indel_near_snv && (cpputil::IndelLen(seg.front())> 0 ||
+                        (seg.size() == 2 && cpputil::IndelLen(seg.back()) > 0))) {
+              ++errorstat.mismatch_filtered_by_indel;
             } else {
-              if (avars[ai].var_qual < opt.bqual_min * avars[ai].read_count ||
-                  (not opt.count_read && readpair_var.size() != 2 )) {
-                q0nerr += avars[ai].alt_seq.size();
-                continue;
-              }
-              if (not opt.allow_indel_near_snv && (cpputil::IndelLen(seg.front())> 0 ||
-                          (seg.size() == 2 && cpputil::IndelLen(seg.back()) > 0))) {
-                ++errorstat.mismatch_filtered_by_indel;
+              if (avars[ai].MutType() == "T>G" and (float) frag_numN > olen * opt.max_N_frac_T2G) {
+                ++errorstat.lowconf_t2g;
               } else {
-                if (avars[ai].MutType() == "T>G" and (float) frag_numN > olen * opt.max_N_frac_T2G) {
-                  ++errorstat.lowconf_t2g;
-                } else {
-                  nerr += avars[ai].alt_seq.size();
-                  q0nerr += avars[ai].alt_seq.size();
-                  ferr << avars[ai] << '\t' << aux_output <<'\n';
-                  // look at strand bias (not for CODEC)
+                nerr += avars[ai].alt_seq.size();
+                q0nerr += avars[ai].alt_seq.size();
+                ferr << avars[ai] << '\t' << aux_output <<'\n';
+                // look at strand bias (not for CODEC)
 //                    std::cerr << readpair_var[0] << "\t" << seg[0].FirstFlag() << "\t" << seg[0].ReverseFlag() << '\n';
 //                    std::cerr << readpair_var[1] << "\t" << seg[1].FirstFlag() << "\t" << seg[1].ReverseFlag() << '\n';
-                }
               }
             }
           }
@@ -773,6 +768,11 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
 }
 
 int codec_accuracy(int argc, char ** argv) {
+  string cmdline;
+  for(int i=0; i<argc; i++){
+    cmdline += argv[i];
+    cmdline+=" ";
+  }
   AccuOptions opt;
   int parse_ret =  accuracy_parse_options(argc, argv, opt);
   if (parse_ret) return 1;
@@ -809,6 +809,7 @@ int codec_accuracy(int argc, char ** argv) {
   std::ofstream cyclelevel;
   string error_profile_header =
       "chrom\tref_pos\tref\talt\ttype\tdist_to_fragend\tsnv_base_qual\tread_count\tread_name\tfamily_size\tnumN\tnumQ60\tolen\tflen";
+  ferr << "#" << cmdline << std::endl;
   ferr << error_profile_header << std::endl;
   if (not opt.known_var_out.empty()) {
     known.open(opt.known_var_out);
@@ -876,7 +877,7 @@ int codec_accuracy(int argc, char ** argv) {
           continue;
         }
         int frag_numN, nqpass, olen;
-        int fail = cpputil::FailFilter(frag, isf.bamheader(), ref, opt, errorstat, isf.IsPairEndLib() & !opt.load_unpair, frag_numN, nqpass, olen);
+        int fail = cpputil::FailFilter(frag, isf.bamheader(), ref, opt, bwa, errorstat, isf.IsPairEndLib() & !opt.load_unpair, frag_numN, nqpass, olen);
         if (fail) {
           failed_cnt.add(frag[0][0].Qname());
           ++errorstat.discard_frag_counter;
@@ -887,7 +888,6 @@ int codec_accuracy(int argc, char ** argv) {
                           frag_numN, nqpass, olen,
                           isf.bamheader(),
                           ref,
-                          bwa,
                           &gr,
                           blacklist,
                           opt,
@@ -926,8 +926,8 @@ int codec_accuracy(int argc, char ** argv) {
                                      "n_filtered_total",
                                      "n_filtered_smallfrag",
                                      "n_filtered_scalip",
-                                     "n_filtered_Nrate",
                                      "n_filtered_q60rate",
+                                     "n_filtered_Nrate",
                                      "n_filtered_largefrag",
                                      "n_filtered_edit",
                                      "n_filtered_clustered",
@@ -973,8 +973,8 @@ int codec_accuracy(int argc, char ** argv) {
        << errorstat.discard_frag_counter << '\t'
        << errorstat.n_filtered_smallfrag << '\t'
       << errorstat.n_filtered_sclip << '\t'
-      << errorstat.n_filtered_Nrate << '\t'
       << errorstat.n_filtered_q30rate << '\t'
+      << errorstat.n_filtered_Nrate << '\t'
        << errorstat.n_filtered_largefrag << '\t'
        << errorstat.n_filtered_edit << '\t'
       << errorstat.n_filtered_clustered << '\t'

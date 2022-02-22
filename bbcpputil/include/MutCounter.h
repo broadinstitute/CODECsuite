@@ -124,7 +124,8 @@ std::pair<int,int> CountValidBaseInMatchedBases(const SeqLib::BamRecord &b,
         if (cur <  qstart) continue;
         if (cur >= qend) break;
         if (not site_blacklist.empty() and site_blacklist.find(refpos + ww) != site_blacklist.end()) continue;
-        if ((N_is_valid && bam_seqi(p,cur) == 15) || bam_seqi(p,cur) != 15) ++q0res;
+        //if ((N_is_valid && bam_seqi(p,cur) == 15) || bam_seqi(p,cur) != 15) ++q0res;
+        ++q0res;
         if ((not N_is_valid && bam_seqi(p,cur) == 15) or bq[cur] < minbq) {
           bq_blacklist.insert(refpos + ww);
           continue;
@@ -286,8 +287,8 @@ int FailFilter(const vector<cpputil::Segments>& frag,
                const SeqLib::BamHeader& bamheader,
                const SeqLib::RefGenome& ref,
                const Options& opt,
-
-                    ErrorStat& errorstat,
+               const SeqLib::BWAWrapper& bwa,
+               ErrorStat& errorstat,
                     bool paired_only,
                     int& frag_numN,
                     int& nqpass,
@@ -332,7 +333,6 @@ int FailFilter(const vector<cpputil::Segments>& frag,
       ++errorstat.n_filtered_sclip;
       return 2;
     }
-    frag_numN = std::max(cpputil::CountNBasesInAlignment((*seg)[0]), cpputil::CountNBasesInAlignment((*seg)[1]));
     nqpass = std::min(qpass.first, qpass.second);
   } else {
     if (opt.filter_5endclip && cpputil::NumSoftClip5End((*seg)[0]) > 0) {
@@ -340,19 +340,19 @@ int FailFilter(const vector<cpputil::Segments>& frag,
       return 2;
     }
     nqpass = std::max(qpass.first, qpass.second);
-    frag_numN = cpputil::CountNBasesInAlignment((*seg)[0]);
-  }
-  if (frag_numN > olen * opt.max_N_frac || frag_numN > opt.max_N_filter) {
-    ++errorstat.n_filtered_Nrate;
-    return 3;
   }
 
   if (nqpass < olen * opt.min_passQ_frac) {
     ++errorstat.n_filtered_q30rate;
-    return 4;
+    return 3;
   }
 
   for (const auto &s: *seg) {
+    frag_numN = cpputil::CountNBasesInAlignment(s);
+    if (frag_numN > s.Length() * opt.max_N_frac || frag_numN > opt.max_N_filter) {
+      ++errorstat.n_filtered_Nrate;
+      return 4;
+    }
 
     if (s.NumMatchBases() > opt.max_fraglen || abs(s.InsertSize()) > opt.max_fraglen) {
       ++errorstat.n_filtered_largefrag;
@@ -368,6 +368,41 @@ int FailFilter(const vector<cpputil::Segments>& frag,
       ++errorstat.n_filtered_clustered;
       return 7;
     }
+  }
+
+  if (opt.max_frac_prim_AS < 1.0) {
+    //alignment filter
+    auto seq = cpputil::MergePairSeq(*seg, true, 0);
+    mem_alnreg_v ar;
+    ar = mem_align1(bwa.GetMemOpt(), bwa.GetIndex()->bwt, bwa.GetIndex()->bns, bwa.GetIndex()->pac,
+                    seq.first.length(), seq.first.data());
+    int primary_score = 0, sec_as=0;
+    for (size_t idx = 0; idx < ar.n; ++idx) {
+      if (ar.a[idx].secondary < 0) {
+        primary_score = ar.a[idx].score;
+        break;
+      }
+    }
+    size_t idx = 0;
+    for (;idx < ar.n; ++idx) {
+      if (ar.a[idx].secondary >= 0 && ar.a[idx].score >= primary_score * opt.max_frac_prim_AS) {
+        sec_as = ar.a[idx].score;
+        break;
+      }
+    }
+    if (ar.n >= 100 || idx < ar.n) {
+      ++errorstat.AS_filter;
+      free(ar.a);
+      return 8;
+      //std::cerr << seg[0].Qname() << "\t" << primary_score <<"\t" << sec_as <<"\t" << ar.n << "\n";
+      //                      SeqLib::BamRecordVector bams;
+      //                      bwa.AlignSequence(seq.first, seg[0].Qname(), bams, false,  0.01, 10);
+      //                      for (unsigned bb = 0; bb < bams.size(); ++bb) {
+      //                        std::cerr << bams[bb] << std::endl;
+      //                      }
+
+    }
+    free(ar.a);
   }
 
   return 0;

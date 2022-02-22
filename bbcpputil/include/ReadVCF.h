@@ -241,7 +241,10 @@ class BCFReader {
         for (int j = 0; j < 2; ++j) { // 2 alleles, maternal, paternal
           int allele_index = bcf_gt_allele(gt[j]);
           int t = bcf_get_variant_type(rec, allele_index);
-          if (allele.empty() && (t == VCF_MNP || t == VCF_SNP) && pos == rec->pos) return true;
+          if (allele.empty() && (t == VCF_MNP || t == VCF_SNP) && pos == rec->pos) {
+            free(gt);
+            return true;
+          }
           if (allele_index >= rec->n_allele) {
             std::cerr << "Error: allele index is large than the number of alleles " << rec->rid << "\t" << rec->pos
                       << "\n";
