@@ -207,7 +207,7 @@ int codec_consensus(int argc, char ** argv) {
             for (auto&s : seg) {
               seqs.push_back(s.Sequence());
             }
-            auto seq = cpputil::MergePair(seg, seqs, opt.trim_overhang, opt.minbq, orig_quals); // trim overhang if true
+            auto seq = cpputil::PairConsensus(seg, seqs, opt.trim_overhang, opt.minbq, orig_quals); // trim overhang if true
             if (seg.front().FirstFlag()) {
               writer.WriteRecord(seg.front(), seg.back(), seq.first, seq.second, orig_quals.front(), orig_quals.back());
             }

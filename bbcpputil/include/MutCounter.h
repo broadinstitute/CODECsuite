@@ -370,12 +370,12 @@ int FailFilter(const vector<cpputil::Segments>& frag,
     }
   }
 
-  if (opt.max_frac_prim_AS < 1.0) {
+  if (opt.max_frac_prim_AS < 1.0 & opt.accurate_burden) {
     //alignment filter
-    auto seq = cpputil::MergePairSeq(*seg, true, 0);
+    auto seq = cpputil::MergePair(*seg, false);
     mem_alnreg_v ar;
     ar = mem_align1(bwa.GetMemOpt(), bwa.GetIndex()->bwt, bwa.GetIndex()->bns, bwa.GetIndex()->pac,
-                    seq.first.length(), seq.first.data());
+                    seq.length(), seq.data());
     int primary_score = 0, sec_as=0;
     for (size_t idx = 0; idx < ar.n; ++idx) {
       if (ar.a[idx].secondary < 0) {

@@ -41,6 +41,8 @@
 #define OPT_READ_LEVEL_STAT   262
 #define OPT_CYCLE_LEVEL_STAT   263
 #define OPT_MAX_N_RATE_T2G   264
+#define OPT_ACCU_BURDEN 265
+
 using std::string;
 using std::vector;
 int MYINT_MAX = std::numeric_limits<int>::max();
@@ -58,6 +60,7 @@ struct AccuOptions {
   bool all_mutant_frags = false;
   bool filter_5endclip = false;
   bool allow_indel_near_snv = false;
+  bool accurate_burden = false;
   int max_N_filter = MYINT_MAX;
   int max_snv_filter = MYINT_MAX;
   int min_fraglen = 0;
@@ -132,6 +135,7 @@ static struct option  accuracy_long_options[] = {
     {"detail_qscore_prof",       no_argument,            0,        OPT_QSCORE_PROF},
     {"read_level_stat",          required_argument,      0,        OPT_READ_LEVEL_STAT},
     {"cycle_level_stat",         required_argument,      0,        OPT_CYCLE_LEVEL_STAT},
+    {"accu_burden",         no_argument,      0,        OPT_ACCU_BURDEN},
     {0,0,0,0}
 };
 const char* accuracy_short_options = "b:a:m:v:S2us:r:e:q:k:RM:p:d:n:x:V:L:DAC:F:N:5Q:g:G:Ic:B:Y:W:";
@@ -183,6 +187,7 @@ void accuracy_print_help()
   //std::cerr<< "-p/--pair_min_overlap,                 When using selector, the minimum overlap between the two ends of the pair. -1 for complete overlap, 0 no overlap required [0].\n";
   std::cerr<< "-R/--count_read,                       When this is true, count #valid bases independently for R1 and R2, including overhang (non overlapping) region of a read pair. [false].\n";
   std::cerr<< "-c/--clustered_mut_cutoff,             Filter out a read if num. mutations are clustered together. [INT_MAX].\n";
+  std::cerr<< "--accu_burden,                         AS filter is applied to all fragments. [mutant fragment only].\n";
   //std::cerr<< "-A/--all_mutant_frags,                 Output all mutant fragments even if not pass failters. Currently only works for known vars [false].\n";
 }
 
@@ -300,6 +305,9 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
         break;
       case OPT_CYCLE_LEVEL_STAT:
         opt.cycle_level_stat = optarg;
+        break;
+      case OPT_ACCU_BURDEN:
+        opt.accurate_burden = true;
         break;
       case 'p':
         opt.pair_min_overlap = atoi(optarg);
@@ -458,6 +466,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
                     int olen,
                     const SeqLib::BamHeader& bamheader,
                     const SeqLib::RefGenome& ref,
+                    const SeqLib::BWAWrapper& bwa,
                     const SeqLib::GenomicRegion* const gr,
                     const std::set<int> blacklist,
                     const AccuOptions& opt,
@@ -593,6 +602,40 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
       if (not found) { // error site
         // mutant_families.txt
         // alignment filter
+        if (opt.max_frac_prim_AS < 1.0 & not opt.accurate_burden) {
+          //alignment filter
+          auto seq = cpputil::MergePairSeq(seg, orig_seqs, false);
+          mem_alnreg_v ar;
+          ar = mem_align1(bwa.GetMemOpt(), bwa.GetIndex()->bwt, bwa.GetIndex()->bns, bwa.GetIndex()->pac,
+                          seq.length(), seq.data());
+          int primary_score = 0, sec_as=0;
+          for (size_t idx = 0; idx < ar.n; ++idx) {
+            if (ar.a[idx].secondary < 0) {
+              primary_score = ar.a[idx].score;
+              break;
+            }
+          }
+          size_t idx = 0;
+          for (;idx < ar.n; ++idx) {
+            if (ar.a[idx].secondary >= 0 && ar.a[idx].score >= primary_score * opt.max_frac_prim_AS) {
+              sec_as = ar.a[idx].score;
+              break;
+            }
+          }
+          if (ar.n >= 100 || idx < ar.n) {
+            ++errorstat.AS_filter;
+            free(ar.a);
+            continue;
+            //std::cerr << seg[0].Qname() << "\t" << primary_score <<"\t" << sec_as <<"\t" << ar.n << "\n";
+            //                      SeqLib::BamRecordVector bams;
+            //                      bwa.AlignSequence(seq.first, seg[0].Qname(), bams, false,  0.01, 10);
+            //                      for (unsigned bb = 0; bb < bams.size(); ++bb) {
+            //                        std::cerr << bams[bb] << std::endl;
+            //                      }
+
+          }
+          free(ar.a);
+        }
 
         //pass alignment filters
         int nerr = 0, q0nerr = 0;
@@ -888,6 +931,7 @@ int codec_accuracy(int argc, char ** argv) {
                           frag_numN, nqpass, olen,
                           isf.bamheader(),
                           ref,
+                          bwa,
                           &gr,
                           blacklist,
                           opt,

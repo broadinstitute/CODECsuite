@@ -89,17 +89,86 @@ std::pair<std::string, std::string>
   return std::make_pair(consns_templ, quality_templ);
 }
 
-std::pair<std::string, std::string> MergePairSeq(const Segments &seg, bool trim_overhang, int qcutoff) {
+std::string MergePairSeq(const Segments &segs, const std::vector<std::string>& seqs, bool trim_overhang) {
+  //seqs should hold the fastq seq for segs. They could be same length but different seqs
+  //not to change indel
+  assert (segs.size() == 2);
+  int ref_most_left;
+  const char NUL = 6;
+  const std::string consns_templ = GetConsensusTemplate(segs, ref_most_left);
+  std::string consns_seq1(consns_templ.size(), NUL);
+  int32_t start = 0;
+  std::string dnaseq, qual;
+  std::vector<std::string> dna_pileup(segs.size());
+  std::vector<std::string> qual_pileup(segs.size());
+  for (unsigned sid = 0; sid < segs.size(); ++sid) {
+    auto const& seg = segs[sid];
+    start = seg.PositionWithSClips() - ref_most_left;
+    std::tie(dnaseq, qual) = GetGappedSeqAndQual(seg, seqs[sid], start, consns_templ);
+    dna_pileup[sid] = dnaseq;
+    qual_pileup[sid] = qual;
+  }
+  for (unsigned jj = 0; jj < consns_templ.size(); ++jj) {
+    // paired baseq calibration. If only one of the baseq < cutoff, make the other one baseq = cutoff -1
+    // so that when later we filter by baseq by this cutoff, they either both stay or both out
+    if (dna_pileup[0][jj] == '.' or dna_pileup[1][jj] == '.') { // overhang
+      if (not trim_overhang) {
+        if (dna_pileup[0][jj] != '.' and dna_pileup[0][jj] != '-' and dna_pileup[1][jj] == '.') {
+          consns_seq1[jj] = dna_pileup[0][jj];
+        } else if (dna_pileup[0][jj] == '.' and dna_pileup[1][jj] != '.' and dna_pileup[1][jj] != '-') {
+          consns_seq1[jj] = dna_pileup[1][jj];
+        }
+      }
+    } else {
+      if (dna_pileup[0][jj] != dna_pileup[1][jj]) {
+        assert(dna_pileup[0][jj] != '-' or dna_pileup[1][jj] != '+');
+        assert(dna_pileup[0][jj] != '+' or dna_pileup[1][jj] != '-');
+        if (dna_pileup[0][jj] == '-' or dna_pileup[0][jj] == '+') {
+          consns_seq1[jj] = dna_pileup[1][jj];
+        }
+        else if (dna_pileup[1][jj] == '-' or dna_pileup[1][jj] == '+') {
+          consns_seq1[jj] = dna_pileup[0][jj];
+        }
+        else {
+          if (qual_pileup[0][jj] < qual_pileup[1][jj]) {
+            consns_seq1[jj] = dna_pileup[1][jj];
+          } else {
+            consns_seq1[jj] = dna_pileup[0][jj];
+          }
+        }
+
+      } else if (dna_pileup[0][jj] >= 'A') {
+        consns_seq1[jj] = dna_pileup[0][jj];
+      } else if (dna_pileup[0][jj] == '+') {
+        assert(false);
+      }
+    }
+  }
+  consns_seq1.erase(std::remove(consns_seq1.begin(), consns_seq1.end(), NUL), consns_seq1.end());
+  return consns_seq1;
+}
+
+std::string MergePair(const Segments &seg, bool trim_overhang) {
   std::vector<std::string> seqs;
   std::vector<std::string> dummy_quals;
   for (auto&s : seg) {
     seqs.push_back(s.Sequence());
   }
-  auto seq = cpputil::MergePair(seg, seqs, trim_overhang, qcutoff, dummy_quals);
+  auto seq = MergePairSeq(seg, seqs, trim_overhang);
   return seq;
 }
 
-std::pair<std::string, std::string> MergePair(const Segments &segs, const std::vector<std::string>& seqs,
+std::pair<std::string, std::string> PairSeqConsensus(const Segments &seg, bool trim_overhang, int qcutoff) {
+  std::vector<std::string> seqs;
+  std::vector<std::string> dummy_quals;
+  for (auto&s : seg) {
+    seqs.push_back(s.Sequence());
+  }
+  auto seq = cpputil::PairConsensus(seg, seqs, trim_overhang, qcutoff, dummy_quals);
+  return seq;
+}
+
+std::pair<std::string, std::string> PairConsensus(const Segments &segs, const std::vector<std::string>& seqs,
     bool trim_overhang, int qcutoff, std::vector<std::string>& out_quals) {
   //seqs should hold the fastq seq for segs. They could be same length but different seqs
   //not to change indel
