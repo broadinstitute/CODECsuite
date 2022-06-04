@@ -9,6 +9,23 @@
 #include "SeqLib/RefGenome.h"
 namespace cpputil {
 
+class BamPileup {
+ public:
+  SeqLib::BamRecord bam;
+  int32_t qpos;
+  int indel, level;
+  uint32_t is_del:1, is_head:1, is_tail:1, is_refskip:1, aux:28;
+  BamPileup(const bam_pileup1_t *pi): bam(pi->b) {
+    qpos = pi->qpos;
+    indel = pi->indel;
+    level = pi->level;
+    is_del = pi->is_del;
+    is_head = pi->is_head;
+    is_refskip = pi->is_refskip;
+    aux = pi->aux;
+  }
+};
+
 bool ProperPair(const SeqLib::BamRecord& bam);
 
 std::pair<int32_t, int32_t> MatePositionAndPositionEndWithSoftClip(const SeqLib::BamRecord & bam);
