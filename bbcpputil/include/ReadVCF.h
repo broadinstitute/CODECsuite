@@ -202,7 +202,7 @@ class BCFReader {
   }
 
 
-  bool var_exist(const string &contig, const int64_t &pos, const string &allele) const {
+  bool var_exist(const string &contig, const int64_t &pos, string allele = "") const {
     /*
      * If allele is empty, assume a SNP mask and return true if just position match.
      */
@@ -220,8 +220,7 @@ class BCFReader {
       int ret = bcf_get_info_string(hdr_, rec, "SVTYPE", &svt, &nsvt);
       free(svt);
       if (ret >= 0) continue;
-      int aa = bcf_get_variant_types(rec);
-
+      rec->d.var_type = -1;
       if (bcf_hdr_nsamples(hdr_) == 0) {
         //no sample column, if any of the alt match
         for (int ii = 1; ii < rec->n_allele; ++ii) {
@@ -240,17 +239,17 @@ class BCFReader {
         assert(ngt == 2); // assume single diploid sample
         for (int j = 0; j < 2; ++j) { // 2 alleles, maternal, paternal
           int allele_index = bcf_gt_allele(gt[j]);
+          if (allele_index == 0) continue;
+          if (allele_index < 0 or allele_index >= rec->n_allele) {
+            std::cerr << "Error: allele index not exist " << rec->rid << "\t" << rec->pos
+                      << "\n";
+            exit(0);
+          }
           int t = bcf_get_variant_type(rec, allele_index);
           if (allele.empty() && (t == VCF_MNP || t == VCF_SNP) && pos == rec->pos) {
             free(gt);
             return true;
           }
-          if (allele_index >= rec->n_allele) {
-            std::cerr << "Error: allele index is large than the number of alleles " << rec->rid << "\t" << rec->pos
-                      << "\n";
-            exit(0);
-          }
-          if (allele_index == -1) continue;
           std::string vcfallele(rec->d.allele[allele_index]);
           if (pos == rec->pos && vcfallele== allele) {
             free(gt);
@@ -273,7 +272,7 @@ class BCFReader {
     }
     while (bcf_sr_next_line(fp_)) {
       bcf1_t* rec = fp_->readers[0].buffer[0];
-
+      rec->d.var_type = -1;
       for (int i=1; i<rec->n_allele; i++)
       {
         int t = bcf_get_variant_type(rec, i);
@@ -296,30 +295,30 @@ template<class VariantsReader>
 bool search_var_in_database(const VariantsReader& variant_reader, const cpputil::Variant& var, std::ofstream& outf,
                             std::string anno, std::vector<bool>& real_muts, bool fall_back_pos_only, int min_baseq, bool out_all_snps) {
   if (variant_reader.var_exist(var.contig, var.contig_start, var.alt_seq)) { // known var
-    if (outf.is_open() && var.isIndel()) outf << var << '\t' << anno << '\n';
+    if (var.isIndel()) {
+      if (outf.is_open()) outf << var << '\t' << anno << '\n';
+    }
     else {
       std::fill(real_muts.begin(), real_muts.end(), true);
       if (outf.is_open() && (out_all_snps || var.var_qual >= min_baseq)) outf << var << '\t' << anno << '\n';
     }
     return true;
   } else {
-    if (var.Type() == "SNV") {
-      if (var.isMNV()) { // rescue if MNV
-        auto avars = cpputil::var_atomize(var);
-        for (unsigned i =0 ; i < avars.size(); ++i) {
-          if (variant_reader.var_exist(avars[i].contig, avars[i].contig_start, avars[i].alt_seq)) {
-            real_muts[i] = true;
-            if (outf.is_open() and (out_all_snps || avars[i].var_qual >= min_baseq)) outf << avars[i] << '\t' << anno << '\n';
-          } else if (fall_back_pos_only && variant_reader.var_exist(avars[i].contig, avars[i].contig_start, "")) {
-            real_muts[i] = true;
-          }
+    if (var.isMNV()) { // rescue if MNV
+      auto avars = cpputil::var_atomize(var);
+      for (unsigned i =0 ; i < avars.size(); ++i) {
+        if (variant_reader.var_exist(avars[i].contig, avars[i].contig_start, avars[i].alt_seq)) {
+          real_muts[i] = true;
+          if (outf.is_open() and (out_all_snps || avars[i].var_qual >= min_baseq)) outf << avars[i] << '\t' << anno << '\n';
+        } else if (fall_back_pos_only && variant_reader.var_exist(avars[i].contig, avars[i].contig_start)) {
+          real_muts[i] = true;
         }
-        if(all_true_mut(real_muts)) return true;
-      } else {
-        if (fall_back_pos_only && variant_reader.var_exist(var.contig, var.contig_start, std::string())) {
-          real_muts[0] = true;
-          return true;
-        }
+      }
+      if(all_true_mut(real_muts)) return true;
+    } else {
+      if (fall_back_pos_only && variant_reader.var_exist(var.contig, var.contig_start)) {
+        real_muts[0] = true;
+        return true;
       }
     }
     return false;

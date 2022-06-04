@@ -118,6 +118,19 @@ struct Variant {
     return res;
   }
 
+  std::string DoubletContext(const SeqLib::RefGenome& ref) {
+    std::string res;
+    if (Type() == "SNV" && not isMNV()) {
+      if (contig_seq == "A" or contig_seq == "G") {
+        res = ref.QueryRegion(contig, contig_start-1, contig_start);
+        reverse_complement(res);
+      } else {
+        res = ref.QueryRegion(contig, contig_start, contig_start + 1);
+      }
+    }
+    return res;
+  }
+
   bool isIndel() const {
     if (Type() == "INS" or Type() == "DEL") return true;
     else return false;
@@ -219,6 +232,44 @@ std::vector<Variant> var_atomize(const Variant& var) {
   return res;
 }
 
+std::pair<std::string, std::string> QualContext(const Variant& var, const std::vector<SeqLib::BamRecord>& bams, int w, int minbq = 30) {
+  //return 3'(downstream) qualities in reference direction
+  //return 5'(upstream) qualities in reverse direction
+  std::string left_res,right_res;
+  if (bams.size() == 1) {
+    auto qual = bams[0].Qualities();
+    int s = var.r1_start - w;
+    if (var.r1_start - w < 0) {
+      left_res = qual.substr(0, var.r1_start);
+    } else {
+      left_res = qual.substr(var.r1_start - w, w);
+    }
+    if (var.r1_start + w >= (int) qual.size() && var.r1_start + 1 < (int) qual.size()) {
+      right_res = qual.substr(var.r1_start + 1);
+    } else {
+      right_res = qual.substr(var.r1_start + 1, w);
+    }
+    std::reverse(left_res.begin(), left_res.end());
+    return std::make_pair(right_res, left_res);
+
+  } else {
+    if(not bams[0].FirstFlag() || bams[1].FirstFlag()){
+      throw std::runtime_error("Wrong read orders\n");
+    }
+    auto qual1 = bams[0].Qualities(0);
+    auto qual2 = bams[1].Qualities(0);
+    for (int ii = 1; ii <= w; ++ii) {
+      if(var.r1_start - ii >= 0 && var.r2_start - ii >=0) {
+        left_res += std::min(qual1[var.r1_start - ii], (char)minbq) + std::min(qual2[var.r2_start - ii], (char)minbq) + 33;
+      }
+      if(var.r1_start + ii < (int) qual1.size() && var.r2_start + ii < (int) qual2.size()) {
+        right_res += std::min(qual1[var.r1_start + ii], (char)minbq) + std::min(qual2[var.r2_start + ii], (char)minbq) + 33;
+      }
+    }
+    return std::make_pair(right_res, left_res);
+  }
+}
+
 Variant squash_vars(const std::vector<Variant>& vars) {
   //squash varaints from the two reads of a read-pair into one
   Variant ret = vars[0];
@@ -231,7 +282,7 @@ Variant squash_vars(const std::vector<Variant>& vars) {
           vars[0].contig_start == vars[1].contig_start &&
           vars[0].read_id == vars[1].read_id &&
           vars[0].alt_seq == vars[1].alt_seq);
-  ret.var_qual += vars[1].var_qual;
+  ret.var_qual = std::min(vars[0].var_qual, 30) + std::min(vars[1].var_qual, 30);
   ret.read_count = 2;
   ret.dist_to_fragend = std::min(abs(vars[0].alt_start), abs(vars[1].alt_start));
   if (vars[0].first_of_pair) {
