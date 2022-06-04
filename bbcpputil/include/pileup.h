@@ -16,6 +16,7 @@
 #include "htslib/sam.h"
 #include "htslib/kstring.h"
 #include "SeqLib/BamWalker.h"
+#include "BamRecordExt.h"
 
 //adapted from samtools
 //https://github.com/samtools/htslib/blob/9672589346459d675d62851d5b7b5f2e5c919076/test/pileup.c
@@ -74,6 +75,57 @@ public:
   }
 };
 
+std::vector<BamPileup> GetPileupReads(PileHandler *input,
+                                      std::string chrom,
+                                      int tpos,
+                                      bool  handle_overlap){
+  bam_mplp_t mplp = NULL;
+  const bam_pileup1_t *pileups[1] = { NULL };
+  int n_plp[1] = { 0 };
+  int tid, pos, n = 0;
+  tid = bam_name2id(input->fp_hdr.get(), chrom.c_str());
+  if (tid < 0) {
+    fprintf(stderr, "%s not found for \"%s\"\n", chrom.c_str(), input->fname.c_str());
+    exit(1);
+  }
+
+  if (input->iter) input->iter.reset();
+  input->iter = std::shared_ptr<hts_itr_t>( sam_itr_queryi(input->idx.get(), tid, tpos, tpos + 1), hts_itr_delete());
+
+  mplp = bam_mplp_init(1, PileHandler::readaln, (void **) &input);
+  if (!mplp) {
+    perror("bam_plp_init");
+    exit(1);
+  }
+  if (handle_overlap) {
+    bam_mplp_init_overlaps(mplp);
+  }
+
+  int non_del_cnt = 0, d = 0;
+  std::vector<BamPileup> res;
+  while ((n = bam_mplp_auto(mplp, &tid, &pos, n_plp, pileups)) > 0) {
+    if (tid < 0) break;
+    if (tid >= input->fp_hdr->n_targets) {
+      fprintf(stderr,
+              "bam_mplp_auto returned tid %d >= header n_targets %d\n",
+              tid, input->fp_hdr->n_targets);
+      exit(1);
+    }
+    if (pos < tpos || pos > tpos) continue;
+    char cc = 0, qq = 0;
+    for (int j = 0; j  < n_plp[0]; ++j) {
+      const bam_pileup1_t *pi = pileups[0] + j;
+      res.emplace_back(pi);
+    }
+    //printf("%s\t%d\t%d\t%d\t%d\n", input->fp_hdr->target_name[tid], pos+1, n_plp[0], nuc_cnt, non_del_cnt);
+  }
+  bam_mplp_destroy(mplp);
+  if (n < 0) {
+    fprintf(stderr, "bam_plp_auto failed for \"%s\"\n", input->fname.c_str());
+    exit(1);
+  }
+  return res;
+}
 
 static int ScanAllele(PileHandler *input, std::string chrom,
                       int tpos,
