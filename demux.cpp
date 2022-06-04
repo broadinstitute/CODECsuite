@@ -21,6 +21,8 @@ struct DemuxOptions {
   int max_ed = 2;
   bool include_non_pf = false;
   bool verbose = false;
+  bool out_unmatch = false;
+  bool out_hopped = false;
   bool count_PF = false;
 };
 
@@ -35,12 +37,14 @@ static struct option  demux_long_options[] = {
     {"index_len",                required_argument,      0,        'l'},
     {"max_ed",                   required_argument,      0,        'e'},
     {"verbose",                  no_argument ,           0,        'v'},
+    {"out_unmatch",                  no_argument ,           0,        'u'},
+    {"out_hopped",                  no_argument ,           0,        'h'},
     {"include_non_pf",           no_argument ,           0,        'i'},
     {"count_pf",                 no_argument ,           0,        'c'},
     {0,0,0,0}
 };
 
-const char* demux_short_options = "p:1:2:o:r:vib:l:e:c";
+const char* demux_short_options = "p:1:2:o:r:vib:l:e:cuh";
 
 void codec_demux_usage()
 {
@@ -58,6 +62,8 @@ void codec_demux_usage()
   std::cerr<< "-i/--include_non_pf,                   Include non-pass filter reads\n";
   std::cerr<< "-v/--verbose,                          Print verbose information\n";
   std::cerr<< "-c/--count_pf,                         Just count number of pass filter pairs. Do not do anything else\n";
+  std::cerr<< "-u/--out_unmatch,                      Output reads having no matching barcodes\n";
+  std::cerr<< "-u/--out_hopped,                       Output reads hopped\n";
 }
 
 int demux_parse_options(int argc, char* argv[], DemuxOptions& opt) {
@@ -100,6 +106,12 @@ int demux_parse_options(int argc, char* argv[], DemuxOptions& opt) {
       case 'c':
         opt.count_PF = true;
         break;
+      case 'h':
+        opt.out_hopped = true;
+        break;
+      case 'u':
+        opt.out_unmatch = true;
+        break;
       default:codec_demux_usage();
         return 1;
     }
@@ -121,7 +133,7 @@ int codec_demux(int argc, char ** argv) {
 //  ag.PrintAllPaths();
 //  exit(0);
 
-  CDS::IndexBarcode ibmatcher(opt.library_file, opt.outprefix, opt.max_ed, opt.verbose);
+  CDS::IndexBarcode ibmatcher(opt.library_file, opt.outprefix, opt.max_ed, opt.out_unmatch, opt.out_hopped, opt.verbose);
   if (!opt.reference.empty()) {
     ibmatcher.LoadBwa(opt.reference);
   }
@@ -145,7 +157,13 @@ int codec_demux(int argc, char ** argv) {
     ibmatcher.DecodePair(read1, read2, opt.index_begin, opt.index_len);
   }
 //  if (opt.count_PF) {
-    std::cerr << "#total, #PF, %PF: " << total_reads << ", " << total_pf_reads << ", " << (float) total_pf_reads / total_reads << std::endl;
+uint64_t total_matched = ibmatcher.total_matched();
+for (unsigned i = 0; i < ibmatcher.samples().size(); ++ i) {
+  string s = ibmatcher.samples()[i];
+  uint64_t n = ibmatcher.nmatched()[i];
+  std::cout << "#sample, matched, matched%: " << s << ", " << n << ", " << (double) n / total_matched << std::endl;
+}
+std::cout << "#total, #PF, #matched, matched%: " << total_reads << ", " << total_pf_reads << ", " << total_matched << ", " << (double) total_matched / total_pf_reads << std::endl;
 //  }
   return 0;
 }

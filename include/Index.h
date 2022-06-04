@@ -30,18 +30,21 @@ int SSW(const std::string &ref, const std::string &query) {
 
 
 bool IsIntermol(const SeqLib::BWAWrapper& bwa,
-    const std::string& name1, const std::string& seq1, const std::string& name2, const std::string& seq2, bool verbose = false) {
+    const std::string& name1, const std::string& seq1, const std::string& name2, const std::string& seq2) {
   SeqLib::BamRecordVector read1_bam;
   SeqLib::BamRecordVector read2_bam;
   bwa.AlignSequence(seq1, name1, read1_bam, false, -1, 0);
   bwa.AlignSequence(seq2, name2, read2_bam, false, -1, 0);
+  if (read1_bam.empty() and read2_bam.empty()) {
+    return false;
+  }
   if (read1_bam.empty() or read2_bam.empty()) {
     return true;
   }
-  if (verbose) {
-    std::cerr << read1_bam[0] << std::endl;
-    std::cerr << read2_bam[0] << std::endl;
-  }
+//  if (verbose) {
+//    std::cerr << read1_bam[0] << std::endl;
+//    std::cerr << read2_bam[0] << std::endl;
+//  }
   auto is = cpputil::InsertSize(read1_bam[0], read2_bam[0]);
   if (is > 1000 || is == 0)  return true;
   else return false;
@@ -51,6 +54,7 @@ class IndexBarcode {
   std::vector<std::string> index1s_;
   std::vector<std::string> index2s_;
   std::vector<std::string> snames_;
+  std::vector<uint64_t> nmatched_;
   std::vector<cpputil::FastqWriter> fq1_writers_;
   std::vector<cpputil::FastqWriter> fq2_writers_;
   cpputil::FastqWriter unkfq1_writer_;
@@ -60,6 +64,8 @@ class IndexBarcode {
   std::ifstream file_;
   SeqLib::BWAWrapper  bwa_;
   int max_ed_;
+  bool out_unmatched_;
+  bool out_hopped_;
   bool verbose_;
 
 //  static const int INDEX_START = 3;
@@ -96,8 +102,8 @@ class IndexBarcode {
   }
 
  public:
-  IndexBarcode (const std::string& index_file, const std::string& outprefix, const int max_ed, bool v):
-        file_(index_file), max_ed_(max_ed), verbose_(v)
+  IndexBarcode (const std::string& index_file, const std::string& outprefix, const int max_ed, bool out_unmatched, bool out_hopped, bool v):
+        file_(index_file), max_ed_(max_ed), out_unmatched_(out_unmatched), out_hopped_(out_hopped), verbose_(v)
   {
     std::string header;
     std::string line;
@@ -106,10 +112,14 @@ class IndexBarcode {
     if (colnames.size() != 3 || colnames[0] != "SampleName" || colnames[1] != "IndexBarcode1" || colnames[2] != "IndexBarcode2") {
       throw std::runtime_error("Invalid index file\n Format required as three tab-delimited columns with header SampleName\tIndexBarcode1\tIndexBarcode2");
     }
-    unkfq1_writer_.open(outprefix + ".unmatched.1.fastq.gz");
-    unkfq2_writer_.open(outprefix + ".unmatched.2.fastq.gz");
-    hopfq1_writer_.open(outprefix + ".hopped.1.fastq.gz");
-    hopfq2_writer_.open(outprefix + ".hopped.2.fastq.gz");
+    if (out_unmatched) {
+      unkfq1_writer_.open(outprefix + ".unmatched.1.fastq.gz");
+      unkfq2_writer_.open(outprefix + ".unmatched.2.fastq.gz");
+    }
+    if (out_unmatched) {
+      hopfq1_writer_.open(outprefix + ".hopped.1.fastq.gz");
+      hopfq2_writer_.open(outprefix + ".hopped.2.fastq.gz");
+    }
     std::set<std::string> unique_sids;
     while(std::getline(file_, line)) {
       std::cerr << line << std::endl;
@@ -125,19 +135,22 @@ class IndexBarcode {
         std::cerr << "Warning: duplicated sample name in library_params. Ignore \"" << line << "\"\n";
       }
     }
+    nmatched_.resize(snames_.size(), 0);
     // Print output header
-    std::cout << "id\t"
-                 "observed_1\t"
-                 "barcode_1\t"
-                 "nm1\t"
-                 "observed_2\t"
-                 "barcode_2\t"
-                 "nm2\t"
-                 "sample_1\t"
-                 "sample_2\t"
-                 "matched\t"
-                 "conflicted\t"
-                 "hopped" << std::endl;
+    if (verbose_) {
+      std::cout << "id\t"
+                   "observed_1\t"
+                   "barcode_1\t"
+                   "nm1\t"
+                   "observed_2\t"
+                   "barcode_2\t"
+                   "nm2\t"
+                   "sample_1\t"
+                   "sample_2\t"
+                   "matched\t"
+                   "conflicted\t"
+                   "hopped" << std::endl;
+    }
   }
 
   void LoadBwa(const std::string &refgenome) {
@@ -166,8 +179,10 @@ class IndexBarcode {
     std::string match;
     std::string conflict = "0";
     if (idx1 == -1 || idx2 == -1 || idx1 != idx2 ) {
-      unkfq1_writer_.Write(r1.id, r1.seq, r1.qual);
-      unkfq2_writer_.Write(r2.id, r2.seq, r2.qual);
+      if (out_unmatched_) {
+        unkfq1_writer_.Write(r1.id, r1.seq, r1.qual);
+        unkfq2_writer_.Write(r2.id, r2.seq, r2.qual);
+      }
       match = "0";
       if (idx1 != -1 && idx2 != -1 && idx1 != idx2) conflict = "1";
     } else {
@@ -175,21 +190,26 @@ class IndexBarcode {
       fq1_writers_[idx1].Write(r1.id.substr(0, stop) + r1b, r1.seq, r1.qual);
       fq2_writers_[idx2].Write(r2.id.substr(0, stop) + r2b, r2.seq, r2.qual);
       match = "1";
+      ++nmatched_[idx1];
     }
     std::string hopped = "0";
     if (conflict == "1" and !bwa_.IsEmpty()) {
       hopped = IsIntermol(bwa_, r1.name(), r1.seq.substr(index_begin + index_len + 1),
-                          r2.name(), r2.seq.substr(index_begin + index_len + 1), verbose_) ? "0" : "1";
-      if (hopped == "1") {
+                          r2.name(), r2.seq.substr(index_begin + index_len + 1)) ? "0" : "1";
+      if (out_hopped_ && hopped == "1") {
         hopfq1_writer_.Write(r1.id, r1.seq, r1.qual);
         hopfq2_writer_.Write(r2.id, r2.seq, r2.qual);
       }
     }
-
-    std::cout << r1.name() << "\t" << ob1 << "\t" << r1b << "\t" << nm1 << "\t" << ob2 << "\t" << \
+    if (verbose_) {
+      std::cout << r1.name() << "\t" << ob1 << "\t" << r1b << "\t" << nm1 << "\t" << ob2 << "\t" << \
                  r2b << "\t" << nm2 << "\t" << r1s << "\t" << r2s << "\t"
-                 << match << "\t" << conflict << "\t" << hopped << "\n";
+                << match << "\t" << conflict << "\t" << hopped << "\n";
+    }
   }
+  uint64_t total_matched() const {return std::accumulate(nmatched_.begin(), nmatched_.end(), (uint64_t) 0);}
+  decltype(auto) samples() const {return snames_;}
+  decltype(auto) nmatched() const {return nmatched_;}
 };
 
 }
