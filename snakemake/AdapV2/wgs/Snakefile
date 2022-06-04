@@ -8,8 +8,8 @@ rule all:
     input:
         expand(ACCU_OUT + "/{index}.error_metrics.txt", index = sample_names),
         expand(Metrics_OUT + "/{index}.raw.insert_size_metrics.txt",index = sample_names),
-        #expand(Metrics_OUT + "/byproduct/{batch_id}.{index}.byproduct.txt", zip, batch_id = metadata.reset_index()['batch'], index = metadata.reset_index()['sample']),
-        expand(Metrics_OUT + "/{index}.{type}.wgs_metrics.txt",index = sample_names, type=['cds_consensus', 'raw', 'cds_consensus.mol_consensus'])
+        expand(Metrics_OUT + "/byproduct/{batch_id}.{index}.byproduct.txt", zip, batch_id = metadata.reset_index()['batch'], index = metadata.reset_index()['sample']),
+        expand(Metrics_OUT + "/{index}.{type}.wgs_metrics.txt",index = sample_names, type=['raw', 'cds_consensus.mol_consensus'])
 
 rule CollectRawWgsMetrics:
     input:
@@ -62,7 +62,7 @@ rule CDSErrorMetrics:
           ref = REF,
           high_conf_region = EAVL_REGION_BED,
           dbsnp = DBSNP,
-          germ_vcf = lambda wildcards : sample_to_vcf.loc[wildcards.index]['germline_vcf'],
+          #germ_vcf = lambda wildcards : sample_to_vcf.loc[wildcards.index]['germline_vcf'],
           germ_bam = lambda wildcards : sample_to_germbam.loc[wildcards.index]['germline_bam'],
     resources:
              mem = 16,
@@ -70,23 +70,23 @@ rule CDSErrorMetrics:
     shell:
          """
             {ACCU_BIN}  -b {input.bam} \
-                -n {params.germ_bam} \
                 -L {params.high_conf_region} \
                 -r {params.ref} \
                 -m 60 \
                 -q 30 \
                 -d 12 \
-                -V {params.germ_vcf},{params.dbsnp} \
+                -V {params.dbsnp} \
                 -x 4 \
                 -c 3 \
                 -5 \
                 -g 30 \
                 -G 250 \
-                -Q 0.5 \
-                -N 0.10 \
+                -Q 0.50 \
                 -B 0.5 \
+                -N 0.1 \
                 -Y 5 \
                 -W 1 \
+                --min_passQ_frac_TT 0.6 \
                 -a {output.accu} \
                 -e {output.error} \
                 -C {output.context}
