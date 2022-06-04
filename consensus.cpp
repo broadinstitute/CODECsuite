@@ -85,7 +85,8 @@ void consensus_print_help()
   std::cerr<< "-o/--outbam,                           Output unmapped bamfile [required].\n";
   std::cerr<< "-m/--mapq,                             Min mapping quality [10].\n";
   std::cerr<< "-q/--baseq,                            paired baseq calibration. If only one of the baseq < cutoff, make the other one baseq = cutoff -1. [0].\n";
-  std::cerr<< "-l/--load_supplementary,               Include supplementary alignment [false].\n";
+  //Supplementary not support currently
+  //std::cerr<< "-l/--load_supplementary,               Include supplementary alignment [false].\n";
   std::cerr<< "-t/--trim_overhang,                    When perform paired-end consensus, if true then only do consensus of the overlapped region [false].\n";
   std::cerr<< "-C/--clip3,                            trim the 3'end soft clipping [false].\n";
 //  std::cerr<< "-s/--output_singleend,                 The R1R2 consensus will be output in a single end format [false].\n";
