@@ -154,6 +154,7 @@ class UnMappedBamWriter {
   }
 
  public:
+  UnMappedBamWriter() = default;
   UnMappedBamWriter(std::string path, std::string rgid, std::string sample) : sample_(sample), rgid_(rgid) {
     std::string header_str = "@HD\tVN:1.5\tGO:none\n";
     header_str += "@RG\tID:" + rgid_ + "\tSM:" + sample_ + "\n";
@@ -175,6 +176,15 @@ class UnMappedBamWriter {
       }
     }
     SeqLib::BamHeader bh(newhdr);
+    bam_writer_.Open(path);
+    bam_writer_.SetHeader(bh);
+    bam_writer_.WriteHeader();
+  }
+
+  void Open(std::string path, std::string rgid, std::string sample) {
+    std::string header_str = "@HD\tVN:1.5\tGO:none\n";
+    header_str += "@RG\tID:" + rgid + "\tSM:" + sample + "\n";
+    SeqLib::BamHeader bh(header_str);
     bam_writer_.Open(path);
     bam_writer_.SetHeader(bh);
     bam_writer_.WriteHeader();
