@@ -19,7 +19,8 @@ struct ErrorStat {
   int64_t nsnv_error = 0;
   int64_t nindel_error = 0;
   int64_t indel_nbase_error = 0;
-  int64_t nerror_masked_by_vcf2 = 0;
+  int64_t nsnv_masked_by_vcf2 = 0;
+  int64_t nindel_masked_by_vcf2 = 0;
   int64_t discard_frag_counter = 0;
   int64_t n_pass_filter_pairs = 0;
   int64_t n_pass_filter_singles = 0;
@@ -326,7 +327,8 @@ int FailFilter(const vector<cpputil::Segments>& frag,
   }
 
   olen = OverlapLenInRef(*seg);
-  auto qpass = NumEffectBases(*seg, opt.bqual_min, opt.count_read, true);
+  auto qpass = NumEffectBases(*seg, opt.bqual_min, opt.count_read, false);
+  //auto qpass_n = NumEffectBases(*seg, 0, opt.count_read, false);
 
   if (seg->size() == 2) {
     if (opt.filter_5endclip && (cpputil::NumSoftClip5End((*seg)[0]) > 0 || cpputil::NumSoftClip5End((*seg)[1]) > 0)) {
@@ -334,12 +336,15 @@ int FailFilter(const vector<cpputil::Segments>& frag,
       return 2;
     }
     nqpass = std::min(qpass.first, qpass.second);
+    frag_numN = seg->front().CountNBases();
+    frag_numN = std::max(frag_numN, seg->back().CountNBases());
   } else {
     if (opt.filter_5endclip && cpputil::NumSoftClip5End((*seg)[0]) > 0) {
       ++errorstat.n_filtered_sclip;
       return 2;
     }
     nqpass = std::max(qpass.first, qpass.second);
+    frag_numN = seg->front().CountNBases();
   }
 
   if (nqpass < olen * opt.min_passQ_frac) {
@@ -347,12 +352,12 @@ int FailFilter(const vector<cpputil::Segments>& frag,
     return 3;
   }
 
+  if (frag_numN > abs(seg->front().InsertSize()) * opt.max_N_frac || frag_numN > opt.max_N_filter) {
+    ++errorstat.n_filtered_Nrate;
+    return 4;
+  }
+
   for (const auto &s: *seg) {
-    frag_numN = cpputil::CountNBasesInAlignment(s);
-    if (frag_numN > s.Length() * opt.max_N_frac || frag_numN > opt.max_N_filter) {
-      ++errorstat.n_filtered_Nrate;
-      return 4;
-    }
 
     if (s.NumMatchBases() > opt.max_fraglen || abs(s.InsertSize()) > opt.max_fraglen) {
       ++errorstat.n_filtered_largefrag;
