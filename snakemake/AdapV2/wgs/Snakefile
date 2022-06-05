@@ -72,6 +72,7 @@ rule CDSErrorMetrics:
             {ACCU_BIN}  -b {input.bam} \
                 -L {params.high_conf_region} \
                 -r {params.ref} \
+                -n {params.germ_bam} \
                 -m 60 \
                 -q 30 \
                 -d 12 \
