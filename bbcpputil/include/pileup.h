@@ -201,6 +201,7 @@ static int ScanIndel(PileHandler *input,
                       int indel,
                       const std::string& seq,
                       bool  handle_overlap,
+                      int wiggle,
                       int &cnt_found,
                       int minbq = 10) {
   /*
@@ -208,73 +209,84 @@ static int ScanIndel(PileHandler *input,
    * inseq is the insert seq, empty for DEL or not checking ins
    */
 
-  cnt_found = 0;
   bam_mplp_t mplp = NULL;
   const bam_pileup1_t *pileups[1] = { NULL };
   int n_plp[1] = { 0 };
-  int tid, pos, n = 0;
-  tid = bam_name2id(input->fp_hdr.get(), chrom.c_str());
+  int tid = bam_name2id(input->fp_hdr.get(), chrom.c_str());
   if (tid < 0) {
     fprintf(stderr, "%s not found for \"%s\"\n", chrom.c_str(), input->fname.c_str());
     return -1;
   }
+  int slen = indel < 0 ? abs(indel) : 0;
+  //std::cerr << "slen: " << slen << std::endl;
+  int non_del_cnt = 0;
+  for (int search = -wiggle; search < slen + wiggle; ++search) {
+    if (input->iter) input->iter.reset();
+    input->iter = std::shared_ptr<hts_itr_t>( sam_itr_queryi(input->idx.get(), tid, tpos + search, tpos + search + 1), hts_itr_delete());
 
-  if (input->iter) input->iter.reset();
-  input->iter = std::shared_ptr<hts_itr_t>( sam_itr_queryi(input->idx.get(), tid, tpos, tpos + 1), hts_itr_delete());
-
-  mplp = bam_mplp_init(1, PileHandler::readaln, (void **) &input);
-  if (!mplp) {
-    perror("bam_plp_init");
-    return -1;
-  }
-  if (handle_overlap) {
-    bam_mplp_init_overlaps(mplp);
-  }
-
-  int non_del_cnt = 0, d = 0;
-  while ((n = bam_mplp_auto(mplp, &tid, &pos, n_plp, pileups)) > 0) {
-    if (tid < 0) break;
-    if (tid >= input->fp_hdr->n_targets) {
-      fprintf(stderr,
-              "bam_mplp_auto returned tid %d >= header n_targets %d\n",
-              tid, input->fp_hdr->n_targets);
+    mplp = bam_mplp_init(1, PileHandler::readaln, (void **) &input);
+    if (!mplp) {
+      perror("bam_plp_init");
       return -1;
     }
-    if (pos < tpos || pos > tpos) continue;
-    char qq = 0;
-    for (int j = 0; j  < n_plp[0]; ++j) {
-      const bam_pileup1_t *pi = pileups[0] + j;
-      if (pi->indel != 0) {
-        if (pi->qpos < pi->b->core.l_qseq) {
-          if (pi->indel < 0) {
-            if (indel == pi->indel) ++cnt_found;
-          } else {
-            std::string inseq(pi->indel + 1, '.');
-            for (int32_t i = 0; i < pi->indel + 1; ++i) {
-              if (pi->qpos + i == pi->b->core.l_qseq) break;
-              inseq[i] = seq_nt16_str[bam_seqi(bam_get_seq(pi->b), pi->qpos + i)];
-            }
-            if (indel == pi->indel && inseq == seq) ++cnt_found;
-          }
-        }
-      }
-      if (pi->is_del or pi->is_refskip) ++d;
-      else {
-        if (pi->qpos < pi->b->core.l_qseq) {
-          uint8_t *qq = bam_get_qual(pi->b);
-          if (qq[pi->qpos] >= minbq) {
-            ++non_del_cnt;
-          }
-        }
-      }
+    if (handle_overlap) {
+      bam_mplp_init_overlaps(mplp);
     }
-    //printf("%s\t%d\t%d\t%d\t%d\n", input->fp_hdr->target_name[tid], pos+1, n_plp[0], nuc_cnt, non_del_cnt);
+
+    cnt_found = 0;
+    int pos, n=0, exact_match=0;
+    //std::cerr << "search: " << search << "\t" << "tpos: " << tpos << std::endl;
+    while ((n = bam_mplp_auto(mplp, &tid, &pos, n_plp, pileups)) > 0) {
+      if (tid < 0) break;
+      if (tid >= input->fp_hdr->n_targets) {
+        fprintf(stderr,
+                "bam_mplp_auto returned tid %d >= header n_targets %d\n",
+                tid, input->fp_hdr->n_targets);
+        return -1;
+      }
+      if (pos != tpos + search) {continue;}
+      for (int j = 0; j  < n_plp[0]; ++j) {
+        const bam_pileup1_t *pi = pileups[0] + j;
+        if (pi->indel != 0) {
+          if (pi->qpos < pi->b->core.l_qseq) {
+            if (pi->indel < 0) {
+              if (indel == pi->indel && search == 0) ++exact_match;
+              if (indel < 0) ++cnt_found;
+            } else {
+              std::string inseq(pi->indel + 1, '.');
+              for (int32_t i = 0; i < pi->indel + 1; ++i) {
+                if (pi->qpos + i == pi->b->core.l_qseq) break;
+                inseq[i] = seq_nt16_str[bam_seqi(bam_get_seq(pi->b), pi->qpos + i)];
+              }
+              if (indel == pi->indel && inseq == seq) ++exact_match;
+              if (indel > 0) ++cnt_found;
+            }
+          }
+        }
+        if (search == 0) {
+          if (not pi->is_del and not pi->is_refskip) {
+            if (pi->qpos < pi->b->core.l_qseq) {
+              uint8_t *qq = bam_get_qual(pi->b);
+              if (qq[pi->qpos] >= minbq) {
+                ++non_del_cnt;
+              }
+            }
+          }
+        }
+      }
+      //printf("%s\t%d\t%d\t%d\t%d\n", input->fp_hdr->target_name[tid], pos+1, n_plp[0], nuc_cnt, non_del_cnt);
+    }
+    if (n < 0) {
+      fprintf(stderr, "bam_plp_auto failed for \"%s\"\n", input->fname.c_str());
+      return -1;
+    }
+    if (cnt_found > 1 || exact_match > 0) {
+      //std::cerr << "found " << cnt_found << "\t" << tpos << "," << search << std::endl;
+      return 30;
+    }
+    bam_mplp_destroy(mplp);
   }
-  bam_mplp_destroy(mplp);
-  if (n < 0) {
-    fprintf(stderr, "bam_plp_auto failed for \"%s\"\n", input->fname.c_str());
-    return -1;
-  }
+  //std::cerr << "depth " << non_del_cnt << std::endl;
   return non_del_cnt;
 }
 

@@ -43,6 +43,7 @@
 #define OPT_MIN_QPASS_RATE_T2G   264
 #define OPT_ACCU_BURDEN 265
 #define OPT_MIN_QPASS_RATE_TT   266
+#define OPT_MAX_GERM_INDEL_DIST  267
 
 using std::string;
 using std::vector;
@@ -74,6 +75,7 @@ struct AccuOptions {
   int germline_minalt = 1;
   int germline_minmapq = 60;
   int germline_mindepth = 5;
+  int germline_indel_maxdist = 5;
   double max_mismatch_frac = 1.0;
   float max_N_frac = 1.0;
   float min_passQ_frac_T2G = 0;
@@ -117,6 +119,7 @@ static struct option  accuracy_long_options[] = {
     {"min_fraglen",              required_argument,      0,        'g'},
     {"max_fraglen",              required_argument,      0,        'G'},
     {"min_germdepth",            required_argument,      0,        'Y'},
+    {"max_germindel_dist",       required_argument,      0,        OPT_MAX_GERM_INDEL_DIST},
     {"max_frac_prim_AS",         required_argument,      0,         'B'},
     {"max_mismatch_frac",        required_argument,      0,        'F'},
     {"min_germline_alt",         required_argument,      0,        'W'},
@@ -181,6 +184,7 @@ void accuracy_print_help()
   std::cerr<< "-F/--max_mismatch_frac,                Filter out a read if its mismatch fraction is larger than this value  [1.0].\n";
   std::cerr<< "-N/--max_N_frac,                       Filter out a read if its fraction of of N larger than this value  [1.0].\n";
   std::cerr<< "-W/--min_germline_alt,                 Minimum number of germline alt reads to be consider as a germline site  [1].\n";
+  std::cerr<< "--max_germindel_dist,                  Filter out a INDEL if its distance to a germline INDEL is less than this number [5].\n";
   std::cerr<< "--min_passQ_frac_T2G,                  Filter out T>G SNV if the fraction of of pass baseq smaller than this value  [0].\n";
   std::cerr<< "--min_passQ_frac_TT,                   Filter out T>G SNV in the context of TT if the fraction of of pass baseq smaller than this value  [0].\n";
   std::cerr<< "-5/--filter_5endclip,                  Filter out a read if it has 5'end soft clipping [false].\n";
@@ -238,6 +242,9 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
         break;
       case 'Y':
         opt.germline_mindepth = atoi(optarg);
+        break;
+      case OPT_MAX_GERM_INDEL_DIST:
+        opt.germline_indel_maxdist = atoi(optarg);
         break;
       case 'c':
         opt.clustered_mut_cutoff = atoi(optarg);
@@ -718,7 +725,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
               int cnt_found = 0;
               int germ_depth = cpputil::ScanIndel(&pileup, avars[ai].contig, avars[ai].contig_start,
                                                   (int) avars[ai].alt_seq.size() - (int) avars[ai].contig_seq.size(),
-                                                  avars[ai].alt_seq, true, germ_support);
+                                                  avars[ai].alt_seq, true, opt.germline_indel_maxdist, germ_support);
               if (germ_depth < opt.germline_mindepth) {
                 ++errorstat.low_germ_depth;
                 continue;
