@@ -19,8 +19,8 @@ struct ErrorStat {
   int64_t nsnv_error = 0;
   int64_t nindel_error = 0;
   int64_t indel_nbase_error = 0;
-  int64_t nsnv_masked_by_vcf2 = 0;
-  int64_t nindel_masked_by_vcf2 = 0;
+  int64_t nsnv_masked_by_vcf1 = 0;
+  int64_t nindel_masked_by_vcf1 = 0;
   int64_t discard_frag_counter = 0;
   int64_t n_pass_filter_pairs = 0;
   int64_t n_pass_filter_singles = 0;
@@ -49,6 +49,7 @@ struct ErrorStat {
   int nindel_filtered_ajabaseq = 0;
   int nindel_filtered_ajaN = 0;
   int mismatch_filtered_by_indel = 0;
+  int snv_family_disagree = 0;
   int lowconf_t2g = 0;
   int low_germ_depth = 0;
   int seen_in_germ = 0;
@@ -302,11 +303,12 @@ int FailFilter(const vector<cpputil::Segments>& frag,
     seg = &frag[0];
   } else {
     for (const auto& ss : frag) {
-      if (not ss[0].SupplementaryFlag() and not ss[0].SecondaryFlag()) {
+      if (not ss[0].DuplicateFlag() and not ss[0].SecondaryFlag()) {
         seg = &ss;
       }
     }
   }
+  if (not seg) {return 999;} // if all reads are duplicates
   if (seg->size() > 2 || (paired_only && seg->size() != 2)) {
     for (auto s : *seg) {
       std::cerr << s << std::endl;

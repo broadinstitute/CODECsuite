@@ -215,6 +215,20 @@ int GetFamilySize(const SeqLib::BamRecord &bam) {
   return nm;
 }
 
+bool GetBTag(const SeqLib::BamRecord& bam, const std::string& tag, std::vector<int64_t>& ret) {
+  uint8_t* p = bam_aux_get(bam.raw(),tag.c_str());
+  if (!p)
+    return false;
+  int len = bam_auxB_len(p);
+  if (len == 0)
+    return false;
+  ret.resize(len);
+  for (int ii =0 ; ii < len; ++ii) {
+    ret[ii] = bam_auxB2i(p, ii);
+  }
+  return true;
+}
+
 int32_t CountNBasesInAlignment(const SeqLib::BamRecord &b) {
   uint32_t *c = bam_get_cigar(b.raw());
   int32_t lc = 0; //left clipping

@@ -96,6 +96,7 @@ struct AccuOptions {
   string maf_file;
   string bed_file;
   string trim_bam = "trimmed.bam";
+  string MID_tag = "";
   unsigned char IndelAnchorBaseQ = '5'; // '?' phred 30 , '5' 20
 };
 
@@ -109,6 +110,7 @@ static struct option  accuracy_long_options[] = {
     {"load_supplementary",       no_argument,            0,        'S'},
     {"load_secondary",           no_argument,            0,        '2'},
     {"load_duplicate",           no_argument,            0,        'D'},
+    {"MID_tag",                  required_argument,      0,        'U'},
     {"mapq",                     required_argument ,     0,        'm'},
     {"vcfs",                     required_argument ,     0,        'V'},
     {"maf",                      required_argument ,     0,        'M'},
@@ -145,7 +147,7 @@ static struct option  accuracy_long_options[] = {
     {"accu_burden",         no_argument,      0,        OPT_ACCU_BURDEN},
     {0,0,0,0}
 };
-const char* accuracy_short_options = "b:a:m:v:S2us:r:e:q:k:R:M:p:d:n:x:V:L:DAC:F:N:5Q:g:G:Ic:B:Y:W:";
+const char* accuracy_short_options = "b:a:m:v:S2us:r:e:q:k:R:M:p:d:n:x:V:L:DAC:F:N:5Q:g:G:Ic:B:Y:W:U:";
 
 void accuracy_print_help()
 {
@@ -158,11 +160,12 @@ void accuracy_print_help()
   std::cerr<< "-L/--bed,                              targeted region\n";
   std::cerr<< "-m/--mapq,                             min mapping quality [10].\n";
 
-  /*Hide options*/
-//  std::cerr<< "-S/--load_supplementary,               include supplementary alignment [false].\n";
-//  std::cerr<< "-2/--load_secondary,                   include secondary alignment [false].\n";
+  std::cerr<< "-S/--load_supplementary,               include supplementary alignment [false].\n";
+  std::cerr<< "-2/--load_secondary,                   include secondary alignment [false].\n";
   std::cerr<< "-u/--load_unpair,                      include unpaired alignment [false].\n";
   std::cerr<< "-D/--load_duplicate,                   include alignment marked as duplicates [false].\n";
+  std::cerr<< "-U/--MID_tag,                          molecular identifier tag name [MI] (MI is used in fgbio). This is only used when -D is on. During this mode, reads will\n"
+                                                      "read in as families which are identified by either MID or start+stop+UMI(if RX tag exist)";
   std::cerr<< "-V/--vcfs,                             comma separated VCF file(s) for germline variants or whitelist variants[null].\n";
   std::cerr<< "-M/--maf,                              MAF file for somatic variants [null].\n";
   std::cerr<< "-s/--sample,                           sample from the VCF file [null].\n";
@@ -272,6 +275,9 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
         break;
       case 'S':
         opt.load_supplementary = true;
+        break;
+      case 'U':
+        opt.MID_tag = optarg;
         break;
       case '2':
         opt.load_secondary = true;
@@ -624,15 +630,15 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
       }
       if (bcf_reader.IsOpen()) {
          found = cpputil::search_var_in_database(bcf_reader, var, known, "PRI_VCF", real_muts, true, opt.bqual_min, opt.all_mutant_frags);
+        if (found and var.Type() == "SNV" and var.var_qual >= opt.bqual_min * var.read_count) {
+          int maskbyvcf1 = n_true_mut(real_muts);
+          errorstat.nsnv_masked_by_vcf1 += maskbyvcf1;
+        } else if(found and var.Type() != "SNV") {
+          errorstat.nindel_masked_by_vcf1 += 1;
+        }
       }
       if (bcf_reader2.IsOpen() && not found) {
-        int maskbyvcf1 = n_true_mut(real_muts);
         found = cpputil::search_var_in_database(bcf_reader2, var, known, "SEC_VCF", real_muts, true, opt.bqual_min, opt.all_mutant_frags);
-        if (found and var.Type() == "SNV" and var.var_qual >= opt.bqual_min * var.read_count) {
-          errorstat.nsnv_masked_by_vcf2 += n_true_mut(real_muts) - maskbyvcf1;
-        } else if(found and var.Type() != "SNV") {
-          errorstat.nindel_masked_by_vcf2 += n_true_mut(real_muts) - maskbyvcf1;
-        }
       }
       if (mafr.IsOpen() && not found) {
         found = cpputil::search_var_in_database(mafr, var, known, "MAF", real_muts, true, opt.bqual_min, opt.all_mutant_frags);
@@ -723,7 +729,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
 
             if (opt.germline_bam.size() > 1) {
               int cnt_found = 0;
-              int germ_depth = cpputil::ScanIndel(&pileup, avars[ai].contig, avars[ai].contig_start,
+              germ_depth = cpputil::ScanIndel(&pileup, avars[ai].contig, avars[ai].contig_start,
                                                   (int) avars[ai].alt_seq.size() - (int) avars[ai].contig_seq.size(),
                                                   avars[ai].alt_seq, true, opt.germline_indel_maxdist, germ_support);
               if (germ_depth < opt.germline_mindepth) {
@@ -807,7 +813,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
             if (opt.count_read == 0 ) {
               qtxt = cpputil::QualContext(avars[ai], seg, 3);
             }
-            ferr << avars[ai] << '\t' << aux_output << '\t' << qtxt.first << '\t' <<qtxt.second <<'\n';
+            ferr << avars[ai] << '\t' << aux_output << '\t' << qtxt.first << '\t' <<qtxt.second << "\t" << germ_depth << '\n';
           } else { // SNV
             if (avars[ai].var_qual < opt.bqual_min * avars[ai].read_count ||
                 (opt.count_read == 0 && readpair_var.size() == 1 ) ||
@@ -826,6 +832,41 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
             if (germ_depth < opt.germline_mindepth) {
               ++errorstat.low_germ_depth;
               //std::cerr << avars[ai] << "\tunder covered in germ " << germ_support << std::endl;
+              continue;
+            }
+
+            //filter if family size > 1
+            bool snv_family_disagree = false;
+            for (int ss = 0; ss < seg.size(); ss++) {
+              int32_t fsize = 1;
+              bool stat = seg[ss].GetIntTag("cD", fsize);
+              //std::cerr << "cD " << fsize << std::endl;
+              if (stat and fsize > 1) {
+                vector<int64_t> fam_depth;
+                vector<int64_t> fam_error;
+                bool has_depth = cpputil::GetBTag(seg[ss], "cd", fam_depth);
+                if (has_depth) {
+                  int readpos = seg[ss].FirstFlag() ? avars[ai].r1_start : avars[ai].r2_start;
+                  //std::cerr << seg[ss] << " read pos " << readpos << std::endl;
+                  if (fam_depth[readpos] < fsize) {
+                    snv_family_disagree = true;
+                    std::cerr << avars[ai] << " families not all agree on depth\n";
+                    break;
+                  }
+                }
+                bool has_error = cpputil::GetBTag(seg[ss], "ce", fam_error);
+                if (has_error) {
+                  int readpos = seg[ss].FirstFlag() ? avars[ai].r1_start : avars[ai].r2_start;
+                  if (fam_error[readpos] > 0) {
+                    snv_family_disagree = true;
+                    std::cerr << avars[ai] << " families not all agree on bases\n";
+                    break;
+                  }
+                }
+              }
+            }
+            if (snv_family_disagree) {
+              ++errorstat.snv_family_disagree;
               continue;
             }
 
@@ -851,7 +892,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
 //            for (const auto& p: pireads) {
 //              std::cerr << p.bam << std::endl;
 //            }
-            ferr << avars[ai] << '\t' << aux_output << '\t' <<  qtxt.first << '\t' <<qtxt.second <<'\n';
+            ferr << avars[ai] << '\t' << aux_output << '\t' <<  qtxt.first << '\t' <<qtxt.second << "\t" << germ_depth << '\n';
             // look at strand bias (not for CODEC)
 //                    std::cerr << readpair_var[0] << "\t" << seg[0].FirstFlag() << "\t" << seg[0].ReverseFlag() << '\n';
 //                    std::cerr << readpair_var[1] << "\t" << seg[1].FirstFlag() << "\t" << seg[1].ReverseFlag() << '\n';
@@ -953,7 +994,7 @@ int codec_accuracy(int argc, char ** argv) {
   std::ofstream readlevel;
   std::ofstream cyclelevel;
   string error_profile_header =
-      "chrom\tref_pos\tref\talt\ttype\tdist_to_fragend\tsnv_base_qual\tread_count\tread_name\tfamily_size\tnumN\tnumQ60\tolen\tflen\tprim_AS\tsec_AS\tqual3p\tqual5p";
+      "chrom\tref_pos\tref\talt\ttype\tdist_to_fragend\tsnv_base_qual\tread_count\tread_name\tfamily_size\tnumN\tnumQ60\tolen\tflen\tprim_AS\tsec_AS\tqual3p\tqual5p\tgerm_depth";
   ferr << "#" << cmdline << std::endl;
   ferr << error_profile_header << std::endl;
   if (not opt.known_var_out.empty()) {
@@ -1011,13 +1052,15 @@ int codec_accuracy(int argc, char ** argv) {
       auto timenow = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
       std::cerr << i + 1 << " region processed. Last position: " << gr << std::ctime(&timenow) << std::endl;
     }
-    if (isf.ReadByRegion(cpputil::ArePEAlignmentOverlapAtLeastK, gr, chunk, opt.pair_min_overlap, "", opt.load_unpair)) {
+    if (isf.ReadByRegion(cpputil::ArePEAlignmentOverlapAtLeastK, gr, chunk, opt.pair_min_overlap, opt.MID_tag, opt.load_unpair)) {
       std::set<int32_t> blacklist;
       if (bcf_reader.IsOpen()) {
         bcf_reader.vcf_to_blacklist_snv(gr, isf.bamheader(), blacklist);
       }
-      for (vector<cpputil::Segments>& frag : chunk) {
-        readpair_cnt.add(frag[0][0].Qname());
+      for (vector<cpputil::Segments>& frag : chunk) { //frag will be a family if -D is true
+        for (const auto& ff : frag) {
+          readpair_cnt.add(ff[0].Qname());
+        }
         if (failed_cnt.exist(frag[0][0].Qname())) {
           //std::cerr << frag[0][0] << " already faile" << std::endl;
           continue;
@@ -1026,7 +1069,7 @@ int codec_accuracy(int argc, char ** argv) {
         int fail = cpputil::FailFilter(frag, isf.bamheader(), ref, opt, bwa, errorstat, isf.IsPairEndLib() & !opt.load_unpair, frag_numN, nqpass, olen);
         if (fail) {
           failed_cnt.add(frag[0][0].Qname());
-          ++errorstat.discard_frag_counter;
+          errorstat.discard_frag_counter += frag.size();
           //std::cerr << fail << ": " << frag[0].size() << ", " << frag[0][0].Qname() << std::endl;
         }
         else {
@@ -1067,8 +1110,8 @@ int codec_accuracy(int argc, char ** argv) {
                            "indel_rate",
                            "n_indel_bases",
                            "indel_bases_rate",
-                           "n_snv_masked_by_vcf2",
-                           "n_indel_masked_by_vcf2",
+                           "n_snv_masked_by_vcf1",
+                           "n_indel_masked_by_vcf1",
                            "n_totalpairs",
                            "n_pass_filter_pair_seg",
                            "n_pass_filter_single_seg",
@@ -1083,6 +1126,7 @@ int codec_accuracy(int argc, char ** argv) {
                            "n_AS_filtered",
                            "nsnv_germ_lowdepth",
                            "nsnv_germ_seen",
+                           "nsnv_family_disagree",
                            "nsnv_mismatch_filtered_by_indel",
                            "nsnv_t2g_low_conf",
                            "nindel_filtered_by_adjbaeq",
@@ -1114,8 +1158,8 @@ int codec_accuracy(int argc, char ** argv) {
       << (float) errorstat.nindel_error / errorstat.neval << '\t'
       << errorstat.indel_nbase_error << '\t'
       << (float) errorstat.indel_nbase_error / errorstat.neval << '\t'
-      << errorstat.nsnv_masked_by_vcf2 << '\t'
-      << errorstat.nindel_masked_by_vcf2 << '\t'
+      << errorstat.nsnv_masked_by_vcf1 << '\t'
+      << errorstat.nindel_masked_by_vcf1 << '\t'
        << readpair_cnt.NumAdded() << '\t'
        << errorstat.n_pass_filter_pairs << '\t'
        << errorstat.n_pass_filter_singles << '\t'
@@ -1130,7 +1174,8 @@ int codec_accuracy(int argc, char ** argv) {
       << errorstat.AS_filter << '\t'
       << errorstat.low_germ_depth << '\t'
        << errorstat.seen_in_germ << '\t'
-       << errorstat.mismatch_filtered_by_indel << '\t'
+      << errorstat.snv_family_disagree << '\t'
+      << errorstat.mismatch_filtered_by_indel << '\t'
        << errorstat.lowconf_t2g << '\t'
        << errorstat.nindel_filtered_ajabaseq << '\t'
       << errorstat.nindel_filtered_ajaN << '\t'

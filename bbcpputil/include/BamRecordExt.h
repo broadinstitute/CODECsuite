@@ -59,6 +59,8 @@ int32_t GetNMismatch(const SeqLib::BamRecord &bam, bool NisMM = false);
 bool HasClusteredMuts(const SeqLib::BamRecord &bam, const SeqLib::BamHeader& header,
                       const SeqLib::RefGenome& refgenome, const int cutoff);
 
+bool GetBTag(const SeqLib::BamRecord&, const std::string&, std::vector<int64_t>&);
+
 int32_t GetNMismatchX(const SeqLib::BamRecord &bam);
 int GetFamilySize(const SeqLib::BamRecord &bam);
 int32_t IndelLen(const SeqLib::BamRecord &bam);

@@ -36,7 +36,8 @@ inline std::string GetUid(const Segments &segs, const std::string& umi_tag) {
       status = segs.back().GetZTag(umi_tag, uid);
     }
   }
-  if(!status) {
+  if(!status) { // molecular identifier not exist
+    std::string rxtag;
     int32_t s, e;
     if (segs.size() == 1) {
       s = segs.front().PositionWithSClips();
@@ -50,7 +51,11 @@ inline std::string GetUid(const Segments &segs, const std::string& umi_tag) {
         e = segs.back().PositionEndWithSClips();
       }
     }
-    uid = std::to_string(s) + "," + std::to_string(e);
+    bool rxtag_status = segs.front().GetZTag("RX", rxtag);
+    if (rxtag_status) {
+      uid = std::to_string(s) + "," + std::to_string(e) + ":" + rxtag;
+    } else {
+    }
   }
   return uid;
 }
