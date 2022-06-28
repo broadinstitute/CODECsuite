@@ -289,7 +289,6 @@ int FailFilter(const vector<cpputil::Segments>& frag,
                const SeqLib::BamHeader& bamheader,
                const SeqLib::RefGenome& ref,
                const Options& opt,
-               const SeqLib::BWAWrapper& bwa,
                ErrorStat& errorstat,
                     bool paired_only,
                     int& frag_numN,
@@ -375,41 +374,22 @@ int FailFilter(const vector<cpputil::Segments>& frag,
       ++errorstat.n_filtered_clustered;
       return 7;
     }
+
+    int XS, AS;
+    bool xsstat = s.GetIntTag("XS", XS);
+    bool asstat = s.GetIntTag("AS", AS);
+    if (xsstat and asstat) {
+      if (XS > AS * opt.max_frac_prim_AS) {
+        ++errorstat.AS_filter;
+        return 8;
+      }
+    }
   }
 
-  if (opt.max_frac_prim_AS < 1.0 & opt.accurate_burden) {
+  if (opt.max_frac_prim_AS < 1.0) {
     //alignment filter
-    auto seq = cpputil::MergePair(*seg, false);
-    mem_alnreg_v ar;
-    ar = mem_align1(bwa.GetMemOpt(), bwa.GetIndex()->bwt, bwa.GetIndex()->bns, bwa.GetIndex()->pac,
-                    seq.length(), seq.data());
-    int primary_score = 0, sec_as=0;
-    for (size_t idx = 0; idx < ar.n; ++idx) {
-      if (ar.a[idx].secondary < 0) {
-        primary_score = ar.a[idx].score;
-        break;
-      }
+    for (unsigned ss = 0; ss < seg->size(); ++ss) {
     }
-    size_t idx = 0;
-    for (;idx < ar.n; ++idx) {
-      if (ar.a[idx].secondary >= 0 && ar.a[idx].score >= primary_score * opt.max_frac_prim_AS) {
-        sec_as = ar.a[idx].score;
-        break;
-      }
-    }
-    if (ar.n >= 100 || idx < ar.n) {
-      ++errorstat.AS_filter;
-      free(ar.a);
-      return 8;
-      //std::cerr << seg[0].Qname() << "\t" << primary_score <<"\t" << sec_as <<"\t" << ar.n << "\n";
-      //                      SeqLib::BamRecordVector bams;
-      //                      bwa.AlignSequence(seq.first, seg[0].Qname(), bams, false,  0.01, 10);
-      //                      for (unsigned bb = 0; bb < bams.size(); ++bb) {
-      //                        std::cerr << bams[bb] << std::endl;
-      //                      }
-
-    }
-    free(ar.a);
   }
 
   return 0;

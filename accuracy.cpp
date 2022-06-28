@@ -502,7 +502,6 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
                     int olen,
                     const SeqLib::BamHeader& bamheader,
                     const SeqLib::RefGenome& ref,
-                    const SeqLib::BWAWrapper& bwa,
                     const SeqLib::GenomicRegion* const gr,
                     const std::set<int> blacklist,
                     const AccuOptions& opt,
@@ -646,6 +645,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
       if (not found) { // error site
         // mutant_families.txt
         // alignment filter
+#if 0
         int primary_score = 0, sec_as=0;
         if (opt.max_frac_prim_AS < 1.0 & not opt.accurate_burden) {
           //alignment filter
@@ -693,6 +693,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
           free(ar.a);
         }
         string aux_output = aux_prefix + "\t" + std::to_string(primary_score) + "\t"  + std::to_string(sec_as);
+#endif
 
         //pass alignment filters
         int nerr = 0, q0nerr = 0;
@@ -813,7 +814,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
             if (opt.count_read == 0 ) {
               qtxt = cpputil::QualContext(avars[ai], seg, 3);
             }
-            ferr << avars[ai] << '\t' << aux_output << '\t' << qtxt.first << '\t' <<qtxt.second << "\t" << germ_depth << '\n';
+            ferr << avars[ai] << '\t' << aux_prefix << '\t' << qtxt.first << '\t' <<qtxt.second << "\t" << germ_depth << '\n';
           } else { // SNV
             if (avars[ai].var_qual < opt.bqual_min * avars[ai].read_count ||
                 (opt.count_read == 0 && readpair_var.size() == 1 ) ||
@@ -892,7 +893,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
 //            for (const auto& p: pireads) {
 //              std::cerr << p.bam << std::endl;
 //            }
-            ferr << avars[ai] << '\t' << aux_output << '\t' <<  qtxt.first << '\t' <<qtxt.second << "\t" << germ_depth << '\n';
+            ferr << avars[ai] << '\t' << aux_prefix << '\t' <<  qtxt.first << '\t' <<qtxt.second << "\t" << germ_depth << '\n';
             // look at strand bias (not for CODEC)
 //                    std::cerr << readpair_var[0] << "\t" << seg[0].FirstFlag() << "\t" << seg[0].ReverseFlag() << '\n';
 //                    std::cerr << readpair_var[1] << "\t" << seg[1].FirstFlag() << "\t" << seg[1].ReverseFlag() << '\n';
@@ -984,8 +985,8 @@ int codec_accuracy(int argc, char ** argv) {
       return 1;
     }
   }
-  SeqLib::BWAWrapper  bwa;
-  bwa.LoadIndex(opt.reference);
+//  SeqLib::BWAWrapper  bwa;
+//  bwa.LoadIndex(opt.reference);
   cpputil::PileHandler pileup;
   if (opt.germline_bam.size() > 1) {
     pileup = cpputil::PileHandler(opt.germline_bam, opt.germline_minmapq);
@@ -994,7 +995,7 @@ int codec_accuracy(int argc, char ** argv) {
   std::ofstream readlevel;
   std::ofstream cyclelevel;
   string error_profile_header =
-      "chrom\tref_pos\tref\talt\ttype\tdist_to_fragend\tsnv_base_qual\tread_count\tread_name\tfamily_size\tnumN\tnumQ60\tolen\tflen\tprim_AS\tsec_AS\tqual3p\tqual5p\tgerm_depth";
+      "chrom\tref_pos\tref\talt\ttype\tdist_to_fragend\tsnv_base_qual\tread_count\tread_name\tfamily_size\tnumN\tnumQ60\tolen\tflen\tqual3p\tqual5p\tgerm_depth";
   ferr << "#" << cmdline << std::endl;
   ferr << error_profile_header << std::endl;
   if (not opt.known_var_out.empty()) {
@@ -1066,7 +1067,7 @@ int codec_accuracy(int argc, char ** argv) {
           continue;
         }
         int frag_numN, nqpass, olen;
-        int fail = cpputil::FailFilter(frag, isf.bamheader(), ref, opt, bwa, errorstat, isf.IsPairEndLib() & !opt.load_unpair, frag_numN, nqpass, olen);
+        int fail = cpputil::FailFilter(frag, isf.bamheader(), ref, opt, errorstat, isf.IsPairEndLib() & !opt.load_unpair, frag_numN, nqpass, olen);
         if (fail) {
           failed_cnt.add(frag[0][0].Qname());
           errorstat.discard_frag_counter += frag.size();
@@ -1077,7 +1078,6 @@ int codec_accuracy(int argc, char ** argv) {
                           frag_numN, nqpass, olen,
                           isf.bamheader(),
                           ref,
-                          bwa,
                           &gr,
                           blacklist,
                           opt,
@@ -1123,7 +1123,7 @@ int codec_accuracy(int argc, char ** argv) {
                            "n_filtered_largefrag",
                            "n_filtered_edit",
                            "n_filtered_clustered",
-                           "n_AS_filtered",
+                           "n_filtered_AS",
                            "nsnv_germ_lowdepth",
                            "nsnv_germ_seen",
                            "nsnv_family_disagree",
