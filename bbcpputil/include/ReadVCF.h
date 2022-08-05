@@ -225,7 +225,7 @@ class BCFReader {
         //no sample column, if any of the alt match
         for (int ii = 1; ii < rec->n_allele; ++ii) {
           int t = bcf_get_variant_type(rec, ii);
-          if (allele.empty() && (t == VCF_MNP || t == VCF_SNP) && pos == rec->pos) return true;
+          if (allele.empty() && pos == rec->pos) return true;
           std::string vcfallele(rec->d.allele[ii]);
           if (pos == rec->pos && vcfallele == allele) {
             return true;
@@ -236,24 +236,39 @@ class BCFReader {
         int32_t *gt = NULL;
         int ngt_arr = 0;
         int ngt = bcf_get_format_int32(hdr_, rec, "GT", &gt, &ngt_arr);
-        assert(ngt == 2); // assume single diploid sample
-        for (int j = 0; j < 2; ++j) { // 2 alleles, maternal, paternal
-          int allele_index = bcf_gt_allele(gt[j]);
-          if (allele_index == 0) continue;
-          if (allele_index < 0 or allele_index >= rec->n_allele) {
-            std::cerr << "Error: allele index not exist " << rec->rid << "\t" << rec->pos
-                      << "\n";
-            exit(0);
+        if (ngt < 0) { // no genotype
+          for (int ii = 1; ii < rec->n_allele; ++ii) {
+            int t = bcf_get_variant_type(rec, ii);
+            if (allele.empty() &&  pos == rec->pos) {
+              free(gt);
+              return true;
+            }
+            std::string vcfallele(rec->d.allele[ii]);
+            if (pos == rec->pos && vcfallele == allele) {
+              free(gt);
+              return true;
+            }
           }
-          int t = bcf_get_variant_type(rec, allele_index);
-          if (allele.empty() && (t == VCF_MNP || t == VCF_SNP) && pos == rec->pos) {
-            free(gt);
-            return true;
-          }
-          std::string vcfallele(rec->d.allele[allele_index]);
-          if (pos == rec->pos && vcfallele== allele) {
-            free(gt);
-            return true;
+        } else {
+          assert(ngt == 2); // assume single diploid sample
+          for (int j = 0; j < 2; ++j) { // 2 alleles, maternal, paternal
+            int allele_index = bcf_gt_allele(gt[j]);
+            if (allele_index == 0) continue;
+            if (allele_index < 0 or allele_index >= rec->n_allele) {
+              std::cerr << "Error: allele index not exist " << rec->rid << "\t" << rec->pos
+                        << "\n";
+              exit(0);
+            }
+            int t = bcf_get_variant_type(rec, allele_index);
+            if (allele.empty() && (t == VCF_MNP || t == VCF_SNP) && pos == rec->pos) {
+              free(gt);
+              return true;
+            }
+            std::string vcfallele(rec->d.allele[allele_index]);
+            if (pos == rec->pos && vcfallele== allele) {
+              free(gt);
+              return true;
+            }
           }
         }
         free(gt);
