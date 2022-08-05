@@ -309,11 +309,16 @@ int32_t GetNMismatch(const SeqLib::BamRecord &bam, bool NisMM) {
   int nm = 0;
   auto status = bam.GetZTag("MD", mdstr);
   if (!status) {
-    std::cerr << "MD tag not exist. use NM " << bam.Qname() << std::endl;
+    //std::cerr << "MD tag not exist. use NM " << bam.Qname() << std::endl;
     int nm = 0;
     bam.GetIntTag("NM", nm);
-    return nm;
-    //throw std::runtime_error("MD tag not exist");
+
+    int ret = nm - IndelLen(bam);
+    if (ret < 0) {
+      std::cerr << bam << std::endl;
+      throw std::runtime_error("invalid bam record");
+    }
+    return ret;
   }
   bool del = false;
   for (size_t i = 0; i < mdstr.size(); ++i) {
@@ -353,9 +358,9 @@ bool HasClusteredMuts(const SeqLib::BamRecord &rec, const SeqLib::BamHeader& hea
 
   const auto cigar = rec.GetCigar();
   const std::string seq = rec.Sequence();
-  if (refstart > refend - 1) {
-    std::cerr << rec << std::endl;
-    throw std::runtime_error("invalid cigar string");
+  if (refstart == refend ) {
+    std::cerr << "read has no match bases "<< rec << std::endl;
+    return false;
   }
   std::string refstr = refgenome.QueryRegion(rname, refstart, refend - 1); // QueryRegion use closed interval
   std::string readstr = seq.substr(readstart, readend - readstart);
