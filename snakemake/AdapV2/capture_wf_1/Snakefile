@@ -60,7 +60,7 @@ rule GroupRawReadByUMI:
              -e 2 \
              -x \
              -m 0 \
-             --strategy=edit \
+             --strategy=paired \
          """
 
 rule RefineUmiGroup:
