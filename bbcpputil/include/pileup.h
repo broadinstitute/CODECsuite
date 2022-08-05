@@ -209,6 +209,7 @@ static int ScanIndel(PileHandler *input,
    * inseq is the insert seq, empty for DEL or not checking ins
    */
 
+  //std::cerr << "scan indels" <<std::endl;
   bam_mplp_t mplp = NULL;
   const bam_pileup1_t *pileups[1] = { NULL };
   int n_plp[1] = { 0 };
@@ -217,7 +218,7 @@ static int ScanIndel(PileHandler *input,
     fprintf(stderr, "%s not found for \"%s\"\n", chrom.c_str(), input->fname.c_str());
     return -1;
   }
-  int slen = indel < 0 ? abs(indel) : 0;
+  int slen = indel < 0 ? abs(indel) : 1;
   //std::cerr << "slen: " << slen << std::endl;
   int non_del_cnt = 0;
   for (int search = -wiggle; search < slen + wiggle; ++search) {
@@ -248,22 +249,23 @@ static int ScanIndel(PileHandler *input,
       for (int j = 0; j  < n_plp[0]; ++j) {
         const bam_pileup1_t *pi = pileups[0] + j;
         if (pi->indel != 0) {
+          //std::cerr << pi->indel <<std::endl;
           if (pi->qpos < pi->b->core.l_qseq) {
             if (pi->indel < 0) {
               if (indel == pi->indel && search == 0) ++exact_match;
               if (indel < 0) ++cnt_found;
             } else {
-              std::string inseq(pi->indel + 1, '.');
-              for (int32_t i = 0; i < pi->indel + 1; ++i) {
-                if (pi->qpos + i == pi->b->core.l_qseq) break;
-                inseq[i] = seq_nt16_str[bam_seqi(bam_get_seq(pi->b), pi->qpos + i)];
+              std::string inseq(pi->indel, '.');
+              for (int32_t i = 0; i < pi->indel; ++i) {
+                if (pi->qpos + i + 1 == pi->b->core.l_qseq) break;
+                inseq[i] = seq_nt16_str[bam_seqi(bam_get_seq(pi->b), pi->qpos + i + 1)];
               }
               if (indel == pi->indel && inseq == seq) ++exact_match;
               if (indel > 0) ++cnt_found;
             }
           }
         }
-        if (search == 0) {
+        if (search == 0) { // get depth
           if (not pi->is_del and not pi->is_refskip) {
             if (pi->qpos < pi->b->core.l_qseq) {
               uint8_t *qq = bam_get_qual(pi->b);
@@ -282,6 +284,7 @@ static int ScanIndel(PileHandler *input,
     }
     if (cnt_found > 1 || exact_match > 0) {
       //std::cerr << "found " << cnt_found << "\t" << tpos << "," << search << std::endl;
+      bam_mplp_destroy(mplp);
       return 30;
     }
     bam_mplp_destroy(mplp);
