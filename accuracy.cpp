@@ -37,67 +37,81 @@
 #include "Algo.h"
 #include "pileup.h"
 
-#define OPT_QSCORE_PROF   261
+//#define OPT_QSCORE_PROF   261
 #define OPT_READ_LEVEL_STAT   262
 #define OPT_CYCLE_LEVEL_STAT   263
-#define OPT_MIN_QPASS_RATE_T2G   264
-#define OPT_ACCU_BURDEN 265
+//#define OPT_MIN_QPASS_RATE_T2G   264
+//#define OPT_ACCU_BURDEN 265
 #define OPT_MIN_QPASS_RATE_TT   266
 #define OPT_MAX_GERM_INDEL_DIST  267
+#define OPT_ALLOW_INDEL_NEAR_SNV  268
+#define OPT_MIN_GERM_MAPQ  269
 
 using std::string;
 using std::vector;
 int MYINT_MAX = std::numeric_limits<int>::max();
 
 struct AccuOptions {
+ //input output
   string bam;
-  string accuracy_stat = "accuracy_stat.txt";
-  string error_prof_out = "error_prof_out.txt";
-  int mapq = 10;
-  int bqual_min = 0;
+  string germline_bam;
+  string reference;
+  string bed_file;
+  vector<string> vcfs;
+  string maf_file;
+
+  string accuracy_stat;
+  string error_prof_out;
+  string context_count;
+  string known_var_out;
+  string sample;
+  string read_level_stat;
+  string cycle_level_stat;
+  string preset;
+
+
+// filtering options
   bool load_supplementary = false;
   bool load_secondary = false;
   bool load_unpair = false;
   bool load_duplicate = false;
-  bool all_mutant_frags = false;
+
+  int count_read = 0;
+  bool indel_calls_only = false;
+
+  int mapq = 20;
+  int bqual_min = 20;
+  int fragend_dist_filter = 0;
+  float min_passQ_frac_TT = 0;
+  float min_passQ_frac = 0;
   bool filter_5endclip = false;
-  bool allow_indel_near_snv = false;
-  bool accurate_burden = false;
   int max_N_filter = MYINT_MAX;
-  int max_snv_filter = MYINT_MAX;
-  int min_fraglen = 0;
+  int max_snv_filter = 5;
+  int min_fraglen = 30;
   int max_fraglen = MYINT_MAX;
   int verbose = 0;
   int clustered_mut_cutoff = MYINT_MAX;
   float max_frac_prim_AS = 1.0;
-  string germline_bam;
-  int germline_minbq = 20;
   int germline_minalt = 1;
-  int germline_minmapq = 60;
+  int germline_minmapq = 20;
   int germline_mindepth = 5;
   int germline_indel_maxdist = 5;
-  double max_mismatch_frac = 1.0;
+  bool allow_indel_near_snv = false;
   float max_N_frac = 1.0;
-  float min_passQ_frac_T2G = 0;
-  float min_passQ_frac_TT = 0;
-  float min_passQ_frac = 0;
-  vector<string> vcfs;
-  string sample = "";
-  string reference;
-  int fragend_dist_filter = 0;
-  int indel_anchor_size= 1;
-  string known_var_out;
-  string context_count = "context_count.txt";
-  bool detail_qscore_prof = false;
-  string read_level_stat;
-  string cycle_level_stat;
-  int pair_min_overlap = 0;
-  int count_read = 0;
-  string maf_file;
-  string bed_file;
-  string trim_bam = "trimmed.bam";
   string MID_tag = "";
+
+  //hidden parameter
+  int indel_anchor_size= 1;
+  int germline_minbq = 20;
   unsigned char IndelAnchorBaseQ = '5'; // '?' phred 30 , '5' 20
+  bool all_mutant_frags = false;
+  bool detail_qscore_prof = false;
+  int pair_min_overlap = 0;
+
+//obsolete
+//  double max_mismatch_frac = 1.0;
+//  float min_passQ_frac_T2G = 0;
+//  string trim_bam = "trimmed.bam";
 };
 
 
@@ -105,6 +119,7 @@ static struct option  accuracy_long_options[] = {
     {"bam",                      required_argument,      0,        'b'},
     {"normal_bam",               required_argument,      0,        'n'},
     {"bed",                      required_argument,      0,        'L'},
+    {"preset",                   required_argument,      0,        'p'},
     {"accuracy_stat",            required_argument,      0,        'a'},
     {"load_unpair",              no_argument,            0,        'u'},
     {"load_supplementary",       no_argument,            0,        'S'},
@@ -114,7 +129,7 @@ static struct option  accuracy_long_options[] = {
     {"mapq",                     required_argument ,     0,        'm'},
     {"vcfs",                     required_argument ,     0,        'V'},
     {"maf",                      required_argument ,     0,        'M'},
-    {"sample",                   required_argument,      0,        's'},
+    {"output",                   required_argument,      0,        'o'},
     {"reference",                required_argument,      0,        'r'},
     {"error_prof_out",           required_argument,      0,        'e'},
     {"bqual_min",                required_argument,      0,        'q'},
@@ -123,17 +138,19 @@ static struct option  accuracy_long_options[] = {
     {"min_germdepth",            required_argument,      0,        'Y'},
     {"max_germindel_dist",       required_argument,      0,        OPT_MAX_GERM_INDEL_DIST},
     {"max_frac_prim_AS",         required_argument,      0,         'B'},
-    {"max_mismatch_frac",        required_argument,      0,        'F'},
+//    {"max_mismatch_frac",        required_argument,      0,        'F'},
     {"min_germline_alt",         required_argument,      0,        'W'},
-    {"filter_5endclip",          no_argument,            0,        '5'},
-    {"allow_indel_near_snv",     no_argument,            0,        'I'},
+    {"min_germline_mapq",        required_argument,      0,        OPT_MIN_GERM_MAPQ},
+    {"disable_5endclip_filtering",    no_argument,            0,        '5'},
+    {"allow_indel_near_snv",     no_argument,            0,        OPT_ALLOW_INDEL_NEAR_SNV},
+    {"indel_calls_only",     no_argument,            0,        'I'},
     {"max_N_frac",               required_argument,      0,        'N'},
-    {"min_passQ_frac_T2G",       required_argument,      0,        OPT_MIN_QPASS_RATE_T2G},
+//    {"min_passQ_frac_T2G",       required_argument,      0,        OPT_MIN_QPASS_RATE_T2G},
     {"min_passQ_frac_TT",        required_argument,      0,        OPT_MIN_QPASS_RATE_TT},
     {"min_passQ_frac",           required_argument,      0,        'Q'},
     {"known_var_out",            required_argument,      0,        'k'},
     {"context_count",            required_argument,      0,        'C'},
-    {"pair_min_overlap",         required_argument,      0,        'p'},
+//    {"pair_min_overlap",         required_argument,      0,        'p'},
     {"count_read",               required_argument,            0,        'R'},
     {"fragend_dist_filter",      required_argument,      0,        'd'},
     {"max_N_filter",             required_argument,      0,        'y'},
@@ -141,19 +158,20 @@ static struct option  accuracy_long_options[] = {
     {"clustered_mut_cutoff",     required_argument,      0,        'c'},
     {"verbose",                  required_argument,      0,        'v'},
     {"all_mutant_frags",         no_argument,             0,        'A'},
-    {"detail_qscore_prof",       no_argument,            0,        OPT_QSCORE_PROF},
+//    {"detail_qscore_prof",       no_argument,            0,        OPT_QSCORE_PROF},
     {"read_level_stat",          required_argument,      0,        OPT_READ_LEVEL_STAT},
     {"cycle_level_stat",         required_argument,      0,        OPT_CYCLE_LEVEL_STAT},
-    {"accu_burden",         no_argument,      0,        OPT_ACCU_BURDEN},
+//   {"accu_burden",         no_argument,      0,        OPT_ACCU_BURDEN},
     {0,0,0,0}
 };
-const char* accuracy_short_options = "b:a:m:v:S2us:r:e:q:k:R:M:p:d:n:x:V:L:DAC:F:N:5Q:g:G:Ic:B:Y:W:U:";
+const char* accuracy_short_options = "b:a:m:v:S2uo:r:e:q:k:R:M:p:d:n:x:V:L:DC:N:5Q:g:G:Ic:B:Y:W:U:";
 
 void accuracy_print_help()
 {
   std::cerr<< "---------------------------------------------------\n";
   std::cerr<< "Usage: codec accuracy [options]\n";
   std::cerr<< "General Options:\n";
+  std::cerr<< "-p/--preset,                           options preset. choice of [stringent, lenient, null]\n";
   std::cerr<< "-v/--verbose,                          [default 0]\n";
   std::cerr<< "-b/--bam,                              input bam\n";
   std::cerr<< "-n/--normal_bam,                       input normal bam [optional]\n";
@@ -168,7 +186,7 @@ void accuracy_print_help()
                                                       "read in as families which are identified by either MID or start+stop+UMI(if RX tag exist)";
   std::cerr<< "-V/--vcfs,                             comma separated VCF file(s) for germline variants or whitelist variants[null].\n";
   std::cerr<< "-M/--maf,                              MAF file for somatic variants [null].\n";
-  std::cerr<< "-s/--sample,                           sample from the VCF file [null].\n";
+  std::cerr<< "-o/--output,                           output prefix. -a, -e, -C overwrite this options [null].\n";
   std::cerr<< "-r/--reference,                        reference sequence in fasta format [null].\n";
   std::cerr<< "-a/--accuracy_stat,                    output reporting accuracy for each alignment [accuracy_stat.txt].\n";
   std::cerr<< "-e/--error_prof_out,                   Error profile output in plain txt format [error_prof_out.txt].\n";
@@ -184,14 +202,16 @@ void accuracy_print_help()
   std::cerr<< "-x/--max_snv_filter,                   Skip a read if the number of mismatch bases is larger than this value [INT_MAX].\n";
   std::cerr<< "-y/--max_N_filter,                     Skip a read if its num of N bases is larger than this value [INT_MAX].\n";
   std::cerr<< "-d/--fragend_dist_filter,              Consider a variant if its distance to the fragment end is at least this value [0].\n";
-  std::cerr<< "-F/--max_mismatch_frac,                Filter out a read if its mismatch fraction is larger than this value  [1.0].\n";
+//  std::cerr<< "-F/--max_mismatch_frac,                Filter out a read if its mismatch fraction is larger than this value  [1.0].\n";
   std::cerr<< "-N/--max_N_frac,                       Filter out a read if its fraction of of N larger than this value  [1.0].\n";
   std::cerr<< "-W/--min_germline_alt,                 Minimum number of germline alt reads to be consider as a germline site  [1].\n";
+  std::cerr<< "--min_germline_mapq,                   Minimum mapq of germline reads [60].\n";
   std::cerr<< "--max_germindel_dist,                  Filter out a INDEL if its distance to a germline INDEL is less than this number [5].\n";
-  std::cerr<< "--min_passQ_frac_T2G,                  Filter out T>G SNV if the fraction of of pass baseq smaller than this value  [0].\n";
+//  std::cerr<< "--min_passQ_frac_T2G,                  Filter out T>G SNV if the fraction of of pass baseq smaller than this value  [0].\n";
   std::cerr<< "--min_passQ_frac_TT,                   Filter out T>G SNV in the context of TT if the fraction of of pass baseq smaller than this value  [0].\n";
-  std::cerr<< "-5/--filter_5endclip,                  Filter out a read if it has 5'end soft clipping [false].\n";
-  std::cerr<< "-I/--allow_indel_near_snv,             allow SNV to pass filter if a indel is found in the same read [false].\n";
+  std::cerr<< "-5/--filter_5endclip,                  Filtering out reads with 5'end soft clipping [False].\n";
+  std::cerr<< "-I/--indel_calls_only,                 call indels only [false].\n";
+  std::cerr<< "--allow_indel_near_snv,                allow SNV to pass filter if a indel is found in the same read [false].\n";
   std::cerr<< "-g/--min_fraglen,                      Filter out a read if its fragment length is less than this value [0].\n";
   std::cerr<< "-B/--max_frac_prim_AS,                 Filter out a read if the AS of secondary alignment is within this fraction of the primary alignment [0.75].\n";
   std::cerr<< "-Y/--min_germdepth,                    Minimum depth in germline bam [5].\n";
@@ -199,7 +219,7 @@ void accuracy_print_help()
   //std::cerr<< "-p/--pair_min_overlap,                 When using selector, the minimum overlap between the two ends of the pair. -1 for complete overlap, 0 no overlap required [0].\n";
   std::cerr<< "-R/--count_read,                       0: collapse R1,R2, only overlapped region. 1: collpase R1,R2; include overhangs. 2: count independently for R1 and R2, including overhang [0].\n";
   std::cerr<< "-c/--clustered_mut_cutoff,             Filter out a read if num. mutations are clustered together. [INT_MAX].\n";
-  std::cerr<< "--accu_burden,                         AS filter is applied to all fragments. [mutant fragment only].\n";
+  //std::cerr<< "--accu_burden,                         AS filter is applied to all fragments. [mutant fragment only].\n";
   //std::cerr<< "-A/--all_mutant_frags,                 Output all mutant fragments even if not pass failters. Currently only works for known vars [false].\n";
 }
 
@@ -255,15 +275,15 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
       case 'd':
         opt.fragend_dist_filter = atoi(optarg);
         break;
-      case 'F':
-        opt.max_mismatch_frac = atof(optarg);
-        break;
+//      case 'F':
+//        opt.max_mismatch_frac = atof(optarg);
+//        break;
       case 'N':
         opt.max_N_frac = atof(optarg);
         break;
-      case OPT_MIN_QPASS_RATE_T2G:
-        opt.min_passQ_frac_T2G = atof(optarg);
-        break;
+//      case OPT_MIN_QPASS_RATE_T2G:
+//        opt.min_passQ_frac_T2G = atof(optarg);
+//        break;
       case OPT_MIN_QPASS_RATE_TT:
         opt.min_passQ_frac_TT = atof(optarg);
         break;
@@ -291,13 +311,16 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
       case '5':
         opt.filter_5endclip = true;
         break;
-      case 'I':
+      case OPT_ALLOW_INDEL_NEAR_SNV:
         opt.allow_indel_near_snv = true;
+        break;
+      case 'I':
+        opt.indel_calls_only = true;
         break;
       case 'R':
         opt.count_read = atoi(optarg);
         break;
-      case 's':
+      case 'o':
         opt.sample = optarg;
         break;
       case 'V':
@@ -318,23 +341,17 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
       case 'C':
         opt.context_count = optarg;
         break;
-      case OPT_QSCORE_PROF:
-        opt.detail_qscore_prof = true;
-        break;
+//      case OPT_QSCORE_PROF:
+//        opt.detail_qscore_prof = true;
+//        break;
       case OPT_READ_LEVEL_STAT:
         opt.read_level_stat = optarg;
         break;
       case OPT_CYCLE_LEVEL_STAT:
         opt.cycle_level_stat = optarg;
         break;
-      case OPT_ACCU_BURDEN:
-        opt.accurate_burden = true;
-        break;
       case 'p':
-        opt.pair_min_overlap = atoi(optarg);
-        break;
-      case 'A':
-        opt.all_mutant_frags = true;
+        opt.preset = optarg;
         break;
       case 'W':
         opt.germline_minalt = atoi(optarg);
@@ -502,6 +519,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
                     int olen,
                     const SeqLib::BamHeader& bamheader,
                     const SeqLib::RefGenome& ref,
+                    const SeqLib::BWAWrapper& bwa,
                     const SeqLib::GenomicRegion* const gr,
                     const std::set<int> blacklist,
                     const AccuOptions& opt,
@@ -641,13 +659,18 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
       }
       if (mafr.IsOpen() && not found) {
         found = cpputil::search_var_in_database(mafr, var, known, "MAF", real_muts, true, opt.bqual_min, opt.all_mutant_frags);
+        if (found and var.Type() == "SNV" and var.var_qual >= opt.bqual_min * var.read_count) {
+          errorstat.nsnv_masked_by_maf += 1;
+        } else if(found and var.Type() != "SNV") {
+          errorstat.nindel_masked_by_maf += 1;
+        }
       }
       if (not found) { // error site
         // mutant_families.txt
         // alignment filter
-#if 0
-        int primary_score = 0, sec_as=0;
-        if (opt.max_frac_prim_AS < 1.0 & not opt.accurate_burden) {
+        int XS;
+        if (opt.max_frac_prim_AS < 1.0 and not seg[0].GetIntTag("XS", XS)) {
+          int primary_score = 0, sec_as=0;
           //alignment filter
           std::string seq;
           if (seg.size() == 2) {
@@ -681,19 +704,13 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
           if (idx < ar.n) {
             ++errorstat.AS_filter;
             free(ar.a);
-            continue;
             //std::cerr << seg[0].Qname() << "\t" << primary_score <<"\t" << sec_as <<"\t" << ar.n << "\n";
-            //                      SeqLib::BamRecordVector bams;
-            //                      bwa.AlignSequence(seq.first, seg[0].Qname(), bams, false,  0.01, 10);
-            //                      for (unsigned bb = 0; bb < bams.size(); ++bb) {
-            //                        std::cerr << bams[bb] << std::endl;
-            //                      }
+            continue;
 
           }
           free(ar.a);
         }
-        string aux_output = aux_prefix + "\t" + std::to_string(primary_score) + "\t"  + std::to_string(sec_as);
-#endif
+        //string aux_output = aux_prefix + "\t" + std::to_string(primary_score) + "\t"  + std::to_string(sec_as);
 
         //pass alignment filters
         int nerr = 0, q0nerr = 0;
@@ -732,16 +749,16 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
               int cnt_found = 0;
               germ_depth = cpputil::ScanIndel(&pileup, avars[ai].contig, avars[ai].contig_start,
                                                   (int) avars[ai].alt_seq.size() - (int) avars[ai].contig_seq.size(),
-                                                  avars[ai].alt_seq, true, opt.germline_indel_maxdist, germ_support);
+                                                  avars[ai].alt_seq.substr(1), true, opt.germline_indel_maxdist, germ_support);
+              if (germ_support > 0) {
+                ++errorstat.seen_in_germ;
+                continue;
+              }
               if (germ_depth < opt.germline_mindepth) {
                 ++errorstat.low_germ_depth;
                 continue;
               }
 
-              if (germ_support > 0) {
-                ++errorstat.seen_in_germ;
-                continue;
-              }
             }
             if (opt.count_read == 0 && readpair_var.size() == 1) {
               continue;
@@ -840,27 +857,27 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
             bool snv_family_disagree = false;
             for (int ss = 0; ss < seg.size(); ss++) {
               int32_t fsize = 1;
-              bool stat = seg[ss].GetIntTag("cD", fsize);
+              bool cDstat = seg[ss].GetIntTag("cD", fsize);
               //std::cerr << "cD " << fsize << std::endl;
-              if (stat and fsize > 1) {
+              if (cDstat and fsize > 1) {
                 vector<int64_t> fam_depth;
                 vector<int64_t> fam_error;
                 bool has_depth = cpputil::GetBTag(seg[ss], "cd", fam_depth);
                 if (has_depth) {
                   int readpos = seg[ss].FirstFlag() ? avars[ai].r1_start : avars[ai].r2_start;
                   //std::cerr << seg[ss] << " read pos " << readpos << std::endl;
-                  if (fam_depth[readpos] < fsize) {
+                  if (fam_depth[readpos] < round(fsize * 0.95)) {
                     snv_family_disagree = true;
-                    std::cerr << avars[ai] << " families not all agree on depth\n";
+                    std::cerr << avars[ai] << " 95% families not all agree on depth\n";
                     break;
                   }
                 }
                 bool has_error = cpputil::GetBTag(seg[ss], "ce", fam_error);
                 if (has_error) {
                   int readpos = seg[ss].FirstFlag() ? avars[ai].r1_start : avars[ai].r2_start;
-                  if (fam_error[readpos] > 0) {
+                  if (fam_error[readpos] > round(0.05 * fsize)) {
                     snv_family_disagree = true;
-                    std::cerr << avars[ai] << " families not all agree on bases\n";
+                    std::cerr << avars[ai] << " 95% families not all agree on bases\n";
                     break;
                   }
                 }
@@ -876,13 +893,12 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
               ++errorstat.mismatch_filtered_by_indel;
               continue;
             }
-            if (avars[ai].MutType() == "T>G" and (opt.min_passQ_frac_T2G > 0 or opt.min_passQ_frac_TT > 0)) {
-              if ((float) nqpass < olen * opt.min_passQ_frac_T2G or
-                  (avars[ai].DoubletContext(ref) == "TT" and (float) nqpass < olen * opt.min_passQ_frac_TT)) {
-                q0nerr += avars[ai].alt_seq.size();
-                ++errorstat.lowconf_t2g;
-                continue;
-              }
+            if (avars[ai].MutType() == "T>G" and opt.min_passQ_frac_TT > 0) {
+                  if (avars[ai].DoubletContext(ref) == "TT" and (float) nqpass < olen * opt.min_passQ_frac_TT) {
+                    q0nerr += avars[ai].alt_seq.size();
+                    ++errorstat.lowconf_t2g;
+                    continue;
+                  }
             }
             nerr += avars[ai].alt_seq.size();
             q0nerr += avars[ai].alt_seq.size();
@@ -967,16 +983,87 @@ int codec_accuracy(int argc, char ** argv) {
     accuracy_print_help();
     return 1;
   }
+  if (not opt.preset.empty()) {
+    if (opt.preset == "lenient") {
+      opt.mapq = 60;
+      opt.bqual_min = 30;
+      opt.fragend_dist_filter = 12;
+      opt.min_passQ_frac_TT = 0.6;
+      opt.min_passQ_frac = 0.5;
+      opt.filter_5endclip = true;
+      opt.max_snv_filter = 5;
+      opt.clustered_mut_cutoff = 3;
+      opt.max_frac_prim_AS = 0.5;
+      opt.germline_minmapq = 60;
+      opt.max_N_frac = 0.1;
+    } else if(opt.preset == "stringent") {
+      opt.mapq = 60;
+      opt.bqual_min = 30;
+      opt.fragend_dist_filter = 12;
+      opt.min_passQ_frac = 0.7;
+      opt.filter_5endclip = true;
+      opt.max_snv_filter = 4;
+      opt.clustered_mut_cutoff = 3;
+      opt.max_frac_prim_AS = 0.5;
+      opt.germline_minmapq = 60;
+      opt.max_N_frac = 0.03;
+    } else if(opt.preset == "null") {
+      opt.mapq = 0;
+      opt.bqual_min = 0;
+      opt.max_snv_filter = MYINT_MAX;
+      opt.max_N_filter = MYINT_MAX;
+      opt.min_fraglen = 0;
+      opt.germline_mindepth = 1;
+      opt.germline_indel_maxdist = 0;
+      opt.allow_indel_near_snv = true;
+    } else {
+      std::cerr << "preset must by one of the [lenient, stringent and null]\n";
+      exit(1);
+    }
+  }
   SeqLib::RefGenome ref;
   ref.LoadIndex(opt.reference);
+  if (opt.accuracy_stat.empty()) {
+    if (opt.sample.empty()) {
+      std::cerr << "must specify output. -a or -o is not used\n";
+      exit(0);
+    }
+    opt.accuracy_stat = opt.sample + ".error_metrics.txt";
+  }
+  if (opt.error_prof_out.empty()) {
+    if (opt.sample.empty()) {
+      std::cerr << "must specify output. -e or -o is not used\n";
+      exit(0);
+    }
+    opt.error_prof_out = opt.sample + ".mutant_families.txt";
+  }
+  if (opt.context_count.empty()) {
+    if (opt.sample.empty()) {
+      std::cerr << "must specify output. -C or -o is not used\n";
+      exit(0);
+    }
+    opt.context_count = opt.sample + ".context_count.txt";
+  }
   std::ofstream stat(opt.accuracy_stat);
   std::ofstream ferr(opt.error_prof_out);
   std::ofstream context(opt.context_count);
+  if (!stat.is_open()) {
+    std::cerr << opt.accuracy_stat << " cannot be opened\n";
+    exit(1);
+  }
+  if (!ferr.is_open()) {
+    std::cerr << opt.error_prof_out << " cannot be opened\n";
+    exit(1);
+  }
+  if (!context.is_open()) {
+    std::cerr << opt.context_count << " cannot be opened\n";
+    exit(1);
+  }
 
   cpputil::BCFReader bcf_reader;
   cpputil::BCFReader bcf_reader2;
   if (!opt.vcfs.empty()) {
-    bcf_reader.Open(opt.vcfs[0].c_str(), opt.sample);
+    bcf_reader.Open(opt.vcfs[0].c_str());
     if (opt.vcfs.size() == 2) {
       bcf_reader2.Open(opt.vcfs[1].c_str());
     }
@@ -985,8 +1072,8 @@ int codec_accuracy(int argc, char ** argv) {
       return 1;
     }
   }
-//  SeqLib::BWAWrapper  bwa;
-//  bwa.LoadIndex(opt.reference);
+  SeqLib::BWAWrapper  bwa;
+  bwa.LoadIndex(opt.reference);
   cpputil::PileHandler pileup;
   if (opt.germline_bam.size() > 1) {
     pileup = cpputil::PileHandler(opt.germline_bam, opt.germline_minmapq);
@@ -1067,7 +1154,7 @@ int codec_accuracy(int argc, char ** argv) {
           continue;
         }
         int frag_numN, nqpass, olen;
-        int fail = cpputil::FailFilter(frag, isf.bamheader(), ref, opt, errorstat, isf.IsPairEndLib() & !opt.load_unpair, frag_numN, nqpass, olen);
+        int fail = cpputil::FailFilter(frag, isf.bamheader(), ref, opt, errorstat, isf.IsPairEndLib() & !opt.load_unpair, opt.indel_calls_only, frag_numN, nqpass, olen);
         if (fail) {
           failed_cnt.add(frag[0][0].Qname());
           errorstat.discard_frag_counter += frag.size();
@@ -1078,6 +1165,7 @@ int codec_accuracy(int argc, char ** argv) {
                           frag_numN, nqpass, olen,
                           isf.bamheader(),
                           ref,
+                          bwa,
                           &gr,
                           blacklist,
                           opt,
@@ -1112,6 +1200,8 @@ int codec_accuracy(int argc, char ** argv) {
                            "indel_bases_rate",
                            "n_snv_masked_by_vcf1",
                            "n_indel_masked_by_vcf1",
+                           "n_snv_masked_by_maf",
+                           "n_indel_masked_by_maf",
                            "n_totalpairs",
                            "n_pass_filter_pair_seg",
                            "n_pass_filter_single_seg",
@@ -1124,8 +1214,8 @@ int codec_accuracy(int argc, char ** argv) {
                            "n_filtered_edit",
                            "n_filtered_clustered",
                            "n_filtered_AS",
-                           "nsnv_germ_lowdepth",
-                           "nsnv_germ_seen",
+                           "mut_germ_lowdepth",
+                           "mut_germ_seen",
                            "nsnv_family_disagree",
                            "nsnv_mismatch_filtered_by_indel",
                            "nsnv_t2g_low_conf",
@@ -1160,6 +1250,8 @@ int codec_accuracy(int argc, char ** argv) {
       << (float) errorstat.indel_nbase_error / errorstat.neval << '\t'
       << errorstat.nsnv_masked_by_vcf1 << '\t'
       << errorstat.nindel_masked_by_vcf1 << '\t'
+      << errorstat.nsnv_masked_by_maf << '\t'
+      << errorstat.nindel_masked_by_maf << '\t'
        << readpair_cnt.NumAdded() << '\t'
        << errorstat.n_pass_filter_pairs << '\t'
        << errorstat.n_pass_filter_singles << '\t'
