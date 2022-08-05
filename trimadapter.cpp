@@ -99,7 +99,7 @@ void codec_trim_usage()
   std::cerr<< "-B/--mismatch                          Penalty for a mismatch [4]\n";
   std::cerr<< "-G/--gap                               Penalty for open or extend a gap [5]\n";
   std::cerr<< "-d/--debug,                            1: detail pairwise alignment plot, 2: Qscore plot, default no debug[0]\n";
-  std::cerr<< "-a/--out_all_bams,                     Output all byproduct bams [false]";
+  std::cerr<< "-a/--out_all_bams,                     Output byproduct to separate bams [false]";
 }
 
 int trim_parse_options(int argc, char* argv[], Options& opt) {
@@ -236,12 +236,18 @@ int codec_trim(int argc, char** argv)
       if (opt.out_all) {
         singleton.WriteRecord(read1, true);
         singleton.WriteRecord(read2, false);
+      } else {
+        highconf.WriteRecord(read1, true);
+        highconf.WriteRecord(read2, false);
       }
     } else if (read2.seq.size() < opt.MIN_READ_LEN) {
       LOST_READ2 ++;
       if (opt.out_all) {
         singleton.WriteRecord(read1, true);
         singleton.WriteRecord(read2, false);
+      } else {
+        highconf.WriteRecord(read1, true);
+        highconf.WriteRecord(read2, false);
       }
     }
     else {
