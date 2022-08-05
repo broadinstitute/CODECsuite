@@ -21,6 +21,8 @@ struct ErrorStat {
   int64_t indel_nbase_error = 0;
   int64_t nsnv_masked_by_vcf1 = 0;
   int64_t nindel_masked_by_vcf1 = 0;
+  int64_t nsnv_masked_by_maf = 0;
+  int64_t nindel_masked_by_maf = 0;
   int64_t discard_frag_counter = 0;
   int64_t n_pass_filter_pairs = 0;
   int64_t n_pass_filter_singles = 0;
@@ -284,6 +286,20 @@ std::pair<int,int> NumEffectBases(const cpputil::Segments& seg, int minbq, bool 
   return std::make_pair(r1, r2);
 }
 
+bool HasBadCigar(const SeqLib::BamRecord& rec) {
+  //If Indel is next to soft clipping
+  const auto cigar = rec.GetCigar();
+  auto s = cigar.size();
+  if (s == 0) return true;
+  if (s > 1 && cigar[0].Type() == 'S') {
+    if (cigar[1].Type() == 'I' or cigar[1].Type() == 'D') return true;
+  }
+  if (s > 1 && cigar[s-1].Type() == 'S') {
+    if (cigar[s-2].Type() == 'I' or cigar[s-2].Type() == 'D') return true;
+  }
+  return false;
+}
+
 template<typename Options>
 int FailFilter(const vector<cpputil::Segments>& frag,
                const SeqLib::BamHeader& bamheader,
@@ -291,12 +307,26 @@ int FailFilter(const vector<cpputil::Segments>& frag,
                const Options& opt,
                ErrorStat& errorstat,
                     bool paired_only,
+                    bool indel_calls_only,
                     int& frag_numN,
                     int& nqpass,
                     int& olen) {
   /*
    * Pass =0, >0 fail mode
    */
+  if (indel_calls_only) {
+    bool has_indel = false;
+    for (const auto &seg: frag) {
+      for (const auto &r : seg)
+      if (IndelLen(r) > 0) {
+        has_indel = true;
+        break;
+      }
+    }
+    if (not has_indel) {
+      return 888;
+    }
+  }
   Segments const *seg = nullptr;
   if (frag.size() == 1) {
     seg = &frag[0];
@@ -375,6 +405,11 @@ int FailFilter(const vector<cpputil::Segments>& frag,
       return 7;
     }
 
+    if (HasBadCigar(s)) {
+      ++errorstat.AS_filter;
+      return 9;
+    }
+
     int XS, AS;
     bool xsstat = s.GetIntTag("XS", XS);
     bool asstat = s.GetIntTag("AS", AS);
@@ -383,12 +418,6 @@ int FailFilter(const vector<cpputil::Segments>& frag,
         ++errorstat.AS_filter;
         return 8;
       }
-    }
-  }
-
-  if (opt.max_frac_prim_AS < 1.0) {
-    //alignment filter
-    for (unsigned ss = 0; ss < seg->size(); ++ss) {
     }
   }
 
