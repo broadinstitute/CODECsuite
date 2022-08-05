@@ -55,9 +55,9 @@ rule SplitFastq1:
          lambda wildcards: batch_to_fastq.loc[wildcards.id]['fastq1']
     params:
           nsplit = nparallel,
-          prefix = "/broad/hptmp/{id}_split_r1"
+          prefix = "/broad/hptmp/ruolin/{id}_split_r1"
     output:
-          split = temp(expand("/broad/hptmp/{{id}}_split_r1.{ss}.fastq", ss = SPLITS))
+          split = temp(expand("/broad/hptmp/ruolin/{{id}}_split_r1.{ss}.fastq", ss = SPLITS))
     resources:
         mem = 8,
         runtime = 24
@@ -71,9 +71,9 @@ rule SplitFastq2:
          lambda wildcards: batch_to_fastq.loc[wildcards.id]['fastq2']
     params:
           nsplit = nparallel,
-          prefix = "/broad/hptmp/{id}_split_r2"
+          prefix = "/broad/hptmp/ruolin/{id}_split_r2"
     output:
-          split = temp(expand("/broad/hptmp/{{id}}_split_r2.{ss}.fastq", ss = SPLITS))
+          split = temp(expand("/broad/hptmp/ruolin/{{id}}_split_r2.{ss}.fastq", ss = SPLITS))
     resources:
         mem = 8,
         runtime = 24
@@ -84,8 +84,8 @@ rule SplitFastq2:
 
 rule DemuxL1:
     input:
-      read1 = "/broad/hptmp/L001_split_r1.{ss}.fastq",
-      read2 = "/broad/hptmp/L001_split_r2.{ss}.fastq",
+      read1 = "/broad/hptmp/ruolin/L001_split_r1.{ss}.fastq",
+      read2 = "/broad/hptmp/ruolin/L001_split_r2.{ss}.fastq",
       sample_sheet = lambda wildcards: batch_to_samplesheet.loc['L001']['sample_sheet']
     output:
       read1 = temp(expand("demux/L001_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L001']['sample'])),
@@ -106,8 +106,8 @@ rule DemuxL1:
 
 rule DemuxL2:
     input:
-      read1 = "/broad/hptmp/L002_split_r1.{ss}.fastq",
-      read2 = "/broad/hptmp/L002_split_r2.{ss}.fastq",
+      read1 = "/broad/hptmp/ruolin/L002_split_r1.{ss}.fastq",
+      read2 = "/broad/hptmp/ruolin/L002_split_r2.{ss}.fastq",
       sample_sheet = lambda wildcards: batch_to_samplesheet.loc['L002']['sample_sheet']
     output:
       read1 = temp(expand("demux/L002_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L002']['sample'])),
@@ -128,12 +128,12 @@ rule DemuxL2:
 
 rule DemuxL3:
     input:
-      read1 = "/broad/hptmp/L003_split_r1.{ss}.fastq",
-      read2 = "/broad/hptmp/L003_split_r2.{ss}.fastq",
+      read1 = "/broad/hptmp/ruolin/L003_split_r1.{ss}.fastq",
+      read2 = "/broad/hptmp/ruolin/L003_split_r2.{ss}.fastq",
       sample_sheet = lambda wildcards: batch_to_samplesheet.loc['L003']['sample_sheet']
     output:
-      read1 = temp(expand("demux/L003_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L003']['sample'])),
-      read2 = temp(expand("demux/L003_split.{{ss}}.{index}.2.fastq.gz",  index = batch_to_samples.loc['L003']['sample'])),
+      read1 = expand("demux/L003_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L003']['sample']),
+      read2 = expand("demux/L003_split.{{ss}}.{index}.2.fastq.gz",  index = batch_to_samples.loc['L003']['sample']),
     resources:
      mem = 8,
      runtime = 24
@@ -150,8 +150,8 @@ rule DemuxL3:
 
 rule DemuxL4:
     input:
-      read1 = "/broad/hptmp/L004_split_r1.{ss}.fastq",
-      read2 = "/broad/hptmp/L004_split_r2.{ss}.fastq",
+      read1 = "/broad/hptmp/ruolin/L004_split_r1.{ss}.fastq",
+      read2 = "/broad/hptmp/ruolin/L004_split_r2.{ss}.fastq",
       sample_sheet = lambda wildcards: batch_to_samplesheet.loc['L004']['sample_sheet']
     output:
       read1 = temp(expand("demux/L004_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L004']['sample'])),
@@ -202,25 +202,9 @@ rule Trim:
             {TRIM} -1 {input.read1} -2 {input.read2} -o  {params.outprefix} -u 3 -U 3 -f 2 -t 2 -s {params.rgsm} > {output.log} 
         """
 
-rule SortInQueryOrder:
-    input:
-         "adap_trimmed/{batch_id}_split.{ss}.{index}.{type}.bam",
-    output:
-          temp("adap_trimmed/{batch_id}_split.{ss}.{index}.{type}.querysort.bam"),
-    resources:
-        mem = 8,
-        runtime = 24,
-    wildcard_constraints:
-        index = "[0-9a-zA-Z_-]+"
-    shell:
-        """
-        {PICARD} SortSam I={input} O={output} SO=queryname TMP_DIR={tmpdir}
-        """
-
-
 rule AlignRawTrimmed:
     input:
-         "adap_trimmed/{batch_id}_split.{ss}.{index}.{type}.querysort.bam",
+         "adap_trimmed/{batch_id}_split.{ss}.{index}.{type}.bam",
     output:
           fastq1 = temp("tmp/{batch_id}_split.{ss}.{index}.{type}.1.fq"),
           fastq2 = temp("tmp/{batch_id}_split.{ss}.{index}.{type}.2.fq"),
@@ -237,12 +221,8 @@ rule AlignRawTrimmed:
           index = "[0-9a-zA-Z_-]+"
     shell:
          """
-         {PICARD} SamToFastq \
-             I={input} \
-             FASTQ={output.fastq1} \
-             TMP_DIR={tmpdir} \
-             SECOND_END_FASTQ={output.fastq2} &&
-         bwa mem \
+         samtools fastq {input} | \
+         bwa mem -p \
              -K 100000000 \
              -Y \
              -t {resources.ncores} \
@@ -252,6 +232,9 @@ rule AlignRawTrimmed:
              UNMAPPED={input} \
              O={output.bam} \
              R={params.reference} \
+             ATTRIBUTES_TO_RETAIN=XS \
+             ATTRIBUTES_TO_RETAIN=XA \
+             ATTRIBUTES_TO_RETAIN=X1 \
              TMP_DIR={tmpdir} \
              CREATE_INDEX=true \
              MAX_RECORDS_IN_RAM=200000
@@ -439,11 +422,8 @@ rule AlignConsensus:
              runtime = 48
     shell:
          """
-         {PICARD} SamToFastq \
-             I={input} \
-             FASTQ={output.fastq1} \
-             SECOND_END_FASTQ={output.fastq2} &&
-         bwa mem \
+         samtools fastq {input} | \
+         bwa mem -p \
              -K 100000000 \
              -Y \
              -t {resources.ncores} \
@@ -548,8 +528,8 @@ rule GroupReadByUMI:
              -i {input} \
              -o {output.bam} \
              -f {output.histogram} \
-             -e 2 \
-             --strategy=edit \
+             -m 0 \
+             --strategy=paired
          """
 
 rule FgbioCollapseReadFamilies:
@@ -571,6 +551,7 @@ rule FgbioCollapseReadFamilies:
              -o {output} \
              -p {params.rg} \
              --threads {resources.ncores} \
+             --consensus-call-overlapping-bases false \
              -M 1
          """
 
@@ -612,5 +593,5 @@ rule MergeAndSortMoleculeConsensusReads:
              --ref {params.reference} \
              --tags-to-reverse Consensus \
              --tags-to-revcomp Consensus \
-        | samtools sort - -o {output.bam} -@ {resources.ncores} && samtools index {output.bam} -@ {resources.ncores}
+        | samtools sort - -o {output.bam} -O BAM -@ {resources.ncores} && samtools index {output.bam} -@ {resources.ncores}
         """
