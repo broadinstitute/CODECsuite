@@ -325,9 +325,9 @@ std::vector<Variant> GetVar(const SeqLib::BamRecord &rec, const SeqLib::BamHeade
 
   const auto cigar = rec.GetCigar();
   const std::string seq = rec.Sequence();
-  if (refstart > refend - 1) {
-    std::cerr << rec << std::endl;
-    throw std::runtime_error("invalid cigar string");
+  if (refstart == refend) {
+    std::cerr <<"read has no match bases " <<rec << std::endl;
+    return vars;
   }
   std::string refstr = refgenome.QueryRegion(rname, refstart, refend - 1); // QueryRegion use closed interval
   std::string readstr = seq.substr(readstart, readend - readstart);
