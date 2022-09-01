@@ -19,7 +19,7 @@ struct Options {
   std::string linker_type = "adapter_v2";
   std::string rgid = "A";
   std::string rgsm = "A";
-  bool out_all = false;
+  bool split_bam_output = false;
   int debug = 0;
   const unsigned MIN_READ_LEN = 15; // this has to be large than TRIM_5 + TRIM_3
   int nbase_skip = 0;
@@ -67,13 +67,13 @@ static struct option  long_options[] = {
   {"post_trim5",               required_argument,      0,        'f'},
   {"post_trim3",               required_argument,      0,        't'},
   {"debug",                    required_argument,      0,        'd'},
-  {"out_all_bams",             no_argument,      0,        'a'},
+  {"split_bam_output",         no_argument,      0,        'S'},
   //hidden parameter
   //{"linker_type",              required_argument,      0,        'l'},
   {0,0,0,0}
 };
 
-const char* trim_short_options = "F:P:1:2:A:B:G:o:t:f:d:l:u:U:T:i:s:n:a";
+const char* trim_short_options = "F:P:1:2:A:B:G:o:t:f:d:l:u:U:T:i:s:n:S";
 
 
 void codec_trim_usage()
@@ -99,7 +99,7 @@ void codec_trim_usage()
   std::cerr<< "-B/--mismatch                          Penalty for a mismatch [4]\n";
   std::cerr<< "-G/--gap                               Penalty for open or extend a gap [5]\n";
   std::cerr<< "-d/--debug,                            1: detail pairwise alignment plot, 2: Qscore plot, default no debug[0]\n";
-  std::cerr<< "-a/--out_all_bams,                     Output byproduct to separate bams [false]";
+  std::cerr<< "-S/--split_bam_output,                     Output byproduct to separate bams [false]";
 }
 
 int trim_parse_options(int argc, char* argv[], Options& opt) {
@@ -164,8 +164,8 @@ int trim_parse_options(int argc, char* argv[], Options& opt) {
         case 'U':
           opt.R2_UMI_LEN = atoi(optarg);
           break;
-        case 'a':
-          opt.out_all = true;
+        case 'S':
+          opt.split_bam_output = true;
           break;
         default:
           codec_trim_usage();
@@ -199,13 +199,14 @@ int codec_trim(int argc, char** argv)
 
   cpputil::UnMappedBamWriter lost;
   cpputil::UnMappedBamWriter singleton;
-  cpputil::UnMappedBamWriter lowconf;
-  cpputil::UnMappedBamWriter untrimboth;
-  if (opt.out_all) {
+  // obsolete
+  //cpputil::UnMappedBamWriter lowconf;
+  //cpputil::UnMappedBamWriter untrimboth;
+  if (opt.split_bam_output) {
     lost.Open(opt.prefix + ".lost.bam", opt.rgid, opt.rgsm);
     singleton.Open(opt.prefix + ".singleton.bam", opt.rgid, opt.rgsm);
-    lowconf.Open(opt.prefix + ".lowconf.bam", opt.rgid, opt.rgsm);
-    untrimboth.Open(opt.prefix + ".untrimboth.bam", opt.rgid, opt.rgsm);
+    //lowconf.Open(opt.prefix + ".lowconf.bam", opt.rgid, opt.rgsm);
+    //untrimboth.Open(opt.prefix + ".untrimboth.bam", opt.rgid, opt.rgsm);
   }
   //cpputil::UnMappedBamWriter trimone(opt.prefix + ".trimone.bam", opt.rgid, opt.rgsm);
   //cpputil::UnMappedBamWriter single_highconf(opt.prefix + ".singleinsert.bam", opt.rgid, opt.rgsm);
@@ -226,26 +227,34 @@ int codec_trim(int argc, char** argv)
     }
     if (read1.seq.size() < opt.MIN_READ_LEN  && read2.seq.size() < opt.MIN_READ_LEN) {
       LOST_BOTH ++;
-      if (opt.out_all) {
+      if (opt.split_bam_output) {
         lost.WriteRecord(read1, true);
         lost.WriteRecord(read2, false);
       }
     }
     else if (read1.seq.size() < opt.MIN_READ_LEN) {
       LOST_READ1 ++;
-      if (opt.out_all) {
+      if (opt.split_bam_output) {
         singleton.WriteRecord(read1, true);
         singleton.WriteRecord(read2, false);
       } else {
+        if (read1.seq.size() == 0) {
+          read1.seq = "ATG"; // fake a read
+          read1.qual = "!!!";
+        }
         highconf.WriteRecord(read1, true);
         highconf.WriteRecord(read2, false);
       }
     } else if (read2.seq.size() < opt.MIN_READ_LEN) {
       LOST_READ2 ++;
-      if (opt.out_all) {
+      if (opt.split_bam_output) {
         singleton.WriteRecord(read1, true);
         singleton.WriteRecord(read2, false);
       } else {
+        if (read2.seq.size() == 0) {
+          read2.seq = "ATG"; // fake a read
+          read2.qual = "!!!";
+        }
         highconf.WriteRecord(read1, true);
         highconf.WriteRecord(read2, false);
       }
@@ -259,10 +268,11 @@ int codec_trim(int argc, char** argv)
           highconf.WriteRecord(read2, false);
         } else {
           LOW_CONF++;
-          if (opt.out_all) {
-            lowconf.WriteRecord(read1, true);
-            lowconf.WriteRecord(read1, false);
-          }
+          //No longer have low conf
+//          if (opt.split_bam_output) {
+//            lowconf.WriteRecord(read1, true);
+//            lowconf.WriteRecord(read1, false);
+//          }
         }
       }
       else { // not used, keep for legacy reason

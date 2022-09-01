@@ -40,6 +40,7 @@ struct Variant {
   std::string alt_qual;
   int family_size;
   bool first_of_pair;
+  bool second_of_pair;
   bool rev_strand;
   int var_qual;
   int32_t read_count;
@@ -55,6 +56,7 @@ struct Variant {
           std::string rqual,
           int fs,
           bool fop,
+          bool sop,
           bool isrev):
 
       contig(ctg),
@@ -66,6 +68,7 @@ struct Variant {
       alt_qual(rqual),
       family_size(fs),
       first_of_pair(fop),
+      second_of_pair(sop),
       rev_strand(isrev),
       var_qual(-1),
       read_count(1),
@@ -157,6 +160,15 @@ struct Variant {
     }
   }
 
+  int32_t EndPos() const {
+    //pass 1 location
+    if (this->Type() == "DEL") {
+      return this->contig_start + this->contig_seq.size();
+    } else {
+      return this->contig_start + 1;
+    }
+  }
+
   bool operator==(const Variant& other) const {
     if (other.contig != this->contig) return false;
     if (other.contig_start != this->contig_start) return false;
@@ -219,6 +231,7 @@ std::vector<Variant> var_atomize(const Variant& var) {
                        var.alt_qual.substr(i, 1),
                        var.family_size,
                        var.first_of_pair,
+                       var.second_of_pair,
                        var.rev_strand);
       res.back().dist_to_fragend = var.dist_to_fragend;
       res.back().var_qual = var.var_qual;
@@ -282,13 +295,19 @@ Variant squash_vars(const std::vector<Variant>& vars) {
           vars[0].contig_start == vars[1].contig_start &&
           vars[0].read_id == vars[1].read_id &&
           vars[0].alt_seq == vars[1].alt_seq);
-  ret.var_qual = std::min(vars[0].var_qual, 30) + std::min(vars[1].var_qual, 30);
+  if (vars[0].var_qual < 30 or vars[1].var_qual < 30) {
+    ret.var_qual = std::min(vars[0].var_qual, 30) + std::min(vars[1].var_qual, 30);
+  } else {
+    ret.var_qual = vars[0].var_qual + vars[1].var_qual;
+  }
   ret.read_count = 2;
   ret.dist_to_fragend = std::min(abs(vars[0].alt_start), abs(vars[1].alt_start));
   if (vars[0].first_of_pair) {
+    ret.second_of_pair = true;
     ret.r1_start = vars[0].r1_start;
     ret.r2_start = vars[1].r2_start;
   } else {
+    ret.first_of_pair = true;
     ret.r2_start = vars[0].r2_start;
     ret.r1_start = vars[1].r1_start;
   }
@@ -361,6 +380,7 @@ std::vector<Variant> GetVar(const SeqLib::BamRecord &rec, const SeqLib::BamHeade
                                qualgapstr.substr(ss, vlen),
                                GetFamilySize(rec),
                                rec.FirstFlag(),
+                               !rec.FirstFlag(),
                                rec.ReverseFlag());
             if (rec.FirstFlag()) v.r1_start = readstart + readpos + ss;
             else v.r2_start = readstart + readpos + ss;
@@ -381,6 +401,7 @@ std::vector<Variant> GetVar(const SeqLib::BamRecord &rec, const SeqLib::BamHeade
                            qualgapstr.substr(ss, vlen),
                            GetFamilySize(rec),
                            rec.FirstFlag(),
+                           !rec.FirstFlag(),
                            rec.ReverseFlag());
         if (rec.FirstFlag()) v.r1_start = readstart + readpos + ss;
         else v.r2_start = readstart + readpos + ss;
@@ -420,6 +441,7 @@ std::vector<Variant> GetVar(const SeqLib::BamRecord &rec, const SeqLib::BamHeade
                              "",
                              GetFamilySize(rec),
                              rec.FirstFlag(),
+                             !rec.FirstFlag(),
                              rec.ReverseFlag());
           if (rec.FirstFlag()) v.r1_start = readstart + readpos -1;
           else v.r2_start = readstart + readpos -1;
@@ -435,6 +457,7 @@ std::vector<Variant> GetVar(const SeqLib::BamRecord &rec, const SeqLib::BamHeade
                              std::string(1, qualstr[readpos - 1]),
                              GetFamilySize(rec),
                              rec.FirstFlag(),
+                             !rec.FirstFlag(),
                              rec.ReverseFlag());
           if (rec.FirstFlag()) v.r1_start = readstart + readpos -1;
           else v.r2_start = readstart + readpos -1;
@@ -462,6 +485,7 @@ std::vector<Variant> GetVar(const SeqLib::BamRecord &rec, const SeqLib::BamHeade
                            qualseq,
                            GetFamilySize(rec),
                            rec.FirstFlag(),
+                            !rec.FirstFlag(),
                            rec.ReverseFlag());
         if (rec.FirstFlag()) v.r1_start = readstart + readpos -1;
         else v.r2_start = readstart + readpos -1;

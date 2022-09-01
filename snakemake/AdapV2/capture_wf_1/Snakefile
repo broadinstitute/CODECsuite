@@ -13,7 +13,7 @@ rule all:
          #expand(DETECT_DIR + "/{index}.detect_fingerprint.txt", index=sample_names),
          expand(Metrics_OUT + "/byproduct/{batch_id}.{index}.byproduct.txt", zip, batch_id = metadata.reset_index()['batch'], index = metadata.reset_index()['sample']),
          expand(Metrics_OUT + "/{index}.raw.umiHistogram.txt",index = metadata.reset_index()['sample']),
-         #expand("miredas/{index}.cds_consensus.mol_consensus_error_metrics.txt", index=sample_names),
+         #expand("miredas/{index}.mol_consensus_error_metrics.txt", index=sample_names),
          #expand(Metrics_OUT + "/{index}.duplex_yield_metrics.txt",index=sample_names),
          #expand("accu/{index}.error_metrics.txt", index=sample_names),
           #expand(Metrics_OUT + "/{index}.raw.hs_metrics.txt", index=sample_names),
@@ -40,34 +40,34 @@ rule CollectRawHsMetrics:
          {PICARD} CollectHsMetrics COVERAGE_CAP=20000 I={input.bam} O={output.metrics} R={params.ref} BAIT_INTERVALS={params.bait} TARGET_INTERVALS={params.bait} PER_TARGET_COVERAGE={output.per_target_cov}
          """
 
-rule GroupRawReadByUMI:
-    input:
-        "tmp/{index}.raw.replacerg.markdup.bam",
-    output:
-         bam = "groupbyumi/{index}.raw.GroupedByUmi.bam",
-         histogram = Metrics_OUT + "/{index}.raw.umiHistogram.txt"
-    resources:
-             mem = 8,
-             runtime = 32,
-             ncores = 2
-    shell:
-         """
-         {FGBIO} --async-io \
-              GroupReadsByUmi \
-             -i {input} \
-             -o {output.bam} \
-             -f {output.histogram} \
-             -e 2 \
-             -x \
-             -m 0 \
-             --strategy=paired \
-         """
+#rule GroupRawReadByUMI:
+#    input:
+#        "tmp/{index}.raw.replacerg.markdup.bam",
+#    output:
+#         bam = "groupbyumi/{index}.raw.GroupedByUmi.bam",
+#         histogram = Metrics_OUT + "/{index}.raw.umiHistogram.txt"
+#    resources:
+#             mem = 8,
+#             runtime = 32,
+#             ncores = 2
+#    shell:
+#         """
+#         {FGBIO} --async-io \
+#              GroupReadsByUmi \
+#             -i {input} \
+#             -o {output.bam} \
+#             -f {output.histogram} \
+#             -e 2 \
+#             -x \
+#             -m 0 \
+#             --strategy=paired \
+#         """
 
 rule RefineUmiGroup:
     input:
-         bam = "consensus/{index}.cds_consensus.mol_consensus.aligned.bam"
+         bam = "consensus/{index}.mol_consensus.aligned.bam"
     output:
-         bam = temp("filtered/{index}.cds_consensus.mol_consensus.aligned.umi_tools.bam")
+         bam = temp("filtered/{index}.mol_consensus.aligned.umi_tools.bam")
     resources:
          mem = 8,
          runtime = 24
@@ -87,10 +87,10 @@ rule RefineUmiGroup:
 ##CODEC specific filters
 rule FilterMolecularConsensusReads:
     input:
-        bam = "filtered/{index}.cds_consensus.mol_consensus.aligned.umi_tools.bam"
+        bam = "filtered/{index}.mol_consensus.aligned.umi_tools.bam"
     output:
-        bam = "filtered/{index}.cds_consensus.mol_consensus.filtered.bam",
-        bai = "filtered/{index}.cds_consensus.mol_consensus.filtered.bam.bai"
+        bam = "filtered/{index}.mol_consensus.filtered.bam",
+        bai = "filtered/{index}.mol_consensus.filtered.bam.bai"
     resources:
         mem = 8,
         runtime = 24
@@ -101,7 +101,7 @@ rule FilterMolecularConsensusReads:
 
 rule CDSErrorMetrics:
     input:
-        bam = "filtered/{index}.cds_consensus.mol_consensus.filtered.bam"
+        bam = "filtered/{index}.mol_consensus.filtered.bam"
     output:
         accu =  "accu/{index}.error_metrics.txt",
         error =  "accu/{index}.mutant_families.txt",
@@ -142,7 +142,7 @@ rule CDSErrorMetrics:
 
 rule MiredasDetectFingerprint:
     input:
-         bam = "filtered/{index}.cds_consensus.mol_consensus.filtered.bam"
+         bam = "filtered/{index}.mol_consensus.filtered.bam"
     output:
          detect = DETECT_DIR + "/{index}.detect_fingerprint.txt",
          families = DETECT_DIR + "/{index}.detect_families.txt"
@@ -166,18 +166,18 @@ rule MiredasDetectFingerprint:
 
 rule MiredasErrorMetrics2:
     input:
-           bam = "filtered/{index}.cds_consensus.mol_consensus.filtered.bam"
+           bam = "filtered/{index}.mol_consensus.filtered.bam"
     output:
-          "miredas/{index}.cds_consensus.mol_consensus_error_metrics.txt",
-          "miredas/{index}.cds_consensus.mol_consensus_mutant_families.txt",
-          "miredas/{index}.cds_consensus.mol_consensus_trinucleotide_context.txt"
+          "miredas/{index}.mol_consensus_error_metrics.txt",
+          "miredas/{index}.mol_consensus_mutant_families.txt",
+          "miredas/{index}.mol_consensus_trinucleotide_context.txt"
     params:
           normal_bam = lambda wildcards: sample_to_germbam.loc[wildcards.index]['germline_bam'],
           sample_id = "{index}",
           germ_vcf = lambda wildcards: sample_to_vcf.loc[wildcards.index]['germline_vcf'],
           interval_list = lambda wildcards: sample_to_bait.loc[wildcards.index]['bait_intervals'],
           mut_maf = lambda wildcards: sample_to_maf.loc[wildcards.index]['fingerprint_maf'],
-          output = "miredas/{index}.cds_consensus.mol_consensus",
+          output = "miredas/{index}.mol_consensus",
           ref = REF,
           max_af = 1.0,
     resources:
@@ -201,10 +201,10 @@ rule MiredasErrorMetrics2:
 
 rule GetContextErrorRate:
     input:
-        mutfam = "miredas/{index}.cds_consensus_mutant_families.txt",
-        tnd = "miredas/{index}.cds_consensus_trinucleotide_context.txt"
+        mutfam = "miredas/{index}.mutant_families.txt",
+        tnd = "miredas/{index}.trinucleotide_context.txt"
     output:
-        "miredas/{index}.cds_consensus_error_monomer.txt",
+        "miredas/{index}.error_monomer.txt",
     wildcard_constraints:
         batch_id="[0-9a-zA-Z_]+",
         index="[0-9a-zA-Z_]+ctDNA"

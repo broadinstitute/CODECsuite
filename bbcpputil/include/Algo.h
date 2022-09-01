@@ -15,27 +15,27 @@ class UniqueQueue {
    * Pair up Queue with Set so that Queue has only unique element
    */
 public:
-  UniqueQueue(int cap) : capacity_(cap), n_added_(0) {};
+  UniqueQueue(size_t cap) : capacity_(cap), n_added_(0) {};
   UniqueQueue() : UniqueQueue(0) {};
 
   bool exist(const std::string& in) const {
-    auto h = hash_string(in.c_str());
-    if (s_.find(h) == s_.end()) return false;
+    //auto h = hash_string(in.c_str());
+    if (s_.find(in) == s_.end()) return false;
     else return true;
   }
 
   void add(const std::string& in) {
-    auto h = hash_string(in.c_str());
-    if (s_.find(h) == s_.end()) {
+    //auto h = hash_string(in.c_str());
+    if (s_.find(in) == s_.end()) {
       if (q_.size() < capacity_) {
         q_.push(in);
-        s_.insert(h);
+        s_.insert(in);
       } else {
        auto key = q_.front();
        q_.pop();
-       s_.erase(hash_string(key.c_str()));
+       s_.erase(key);
        q_.push(in);
-       s_.insert(h);
+       s_.insert(in);
       }
       ++n_added_;
     }
@@ -64,13 +64,14 @@ private:
     return hash;
   }
 
-  std::unordered_set<uint64_t> s_; //use int to save space
+  std::unordered_set<std::string> s_;
   std::queue<std::string> q_;
+  const size_t capacity_;
   uint64_t n_added_;
-  const int capacity_;
 };
 
 inline int largest_cluster(std::vector<int> sortedpos, int window, int &beg, int &end) {
+  std::sort(sortedpos.begin(), sortedpos.end());
   if (sortedpos.size() == 0) return 0;
   if (sortedpos.size() == 1) {
     beg = sortedpos[0];

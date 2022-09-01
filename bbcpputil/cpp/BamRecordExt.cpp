@@ -80,7 +80,7 @@ std::pair<int32_t, int32_t> MatePositionAndPositionEnd(const SeqLib::BamRecord &
 int32_t InsertSize(const SeqLib::BamRecord & read1, const SeqLib::BamRecord& read2) {
   assert(read1.Qname() == read2.Qname());
   if (read1.ChrID() != read2.ChrID()) return 0;
-  if (read1.ReverseFlag() ^ read2.ReverseFlag() == 0) return 0;
+  if ((read1.ReverseFlag() ^ read2.ReverseFlag()) == 0) return 0;
   if (not read1.MappedFlag() || not read2.MappedFlag()) return 0;
   int right, left;
   if (read1.ReverseFlag()) {
@@ -188,7 +188,7 @@ void AddMatchedBasesToCycleCount( const SeqLib::BamRecord& b,
   for (; i < b.raw()->core.n_cigar; ++i) {
     char cigar = bam_cigar_opchr(c[i]);
     if (cigar == 'M' or cigar == 'X' or cigar == '=') {
-      for(int ww = 0; ww < bam_cigar_oplen(c[i]); ++ww) {
+      for(int ww = 0; ww < (int) bam_cigar_oplen(c[i]); ++ww) {
         if (ww + readpos <  start) continue;
         if (ww + readpos >= end) break;
         if (bam_seqi(p, ww + readpos) != 15) {
@@ -240,7 +240,7 @@ int32_t CountNBasesInAlignment(const SeqLib::BamRecord &b) {
   }
 
   int32_t rc = 0; // right clipping
-  for (int32_t i = b.raw()->core.n_cigar - 1; i >= 0; --i) { // loop from the end
+  for (unsigned i = b.raw()->core.n_cigar - 1; i >= 0; --i) { // loop from the end
     if ((bam_cigar_opchr(c[i]) == 'S'))
       rc += bam_cigar_oplen(c[i]);
     else if (bam_cigar_opchr(c[i]) != 'H')// not a clip, so stop counting
@@ -279,7 +279,7 @@ int32_t GetNMismatchX(const SeqLib::BamRecord &bam) {
   uint32_t *c = bam_get_cigar(bam.raw());
   bool newtype_cigar = false;
   int nm = 0;
-  for (int i = 0; i < bam.raw()->core.n_cigar; ++i) {
+  for (unsigned i = 0; i < bam.raw()->core.n_cigar; ++i) {
     char cigar = bam_cigar_opchr(c[i]);
     if ( cigar == '=') {
       newtype_cigar = true;
@@ -294,7 +294,7 @@ int32_t GetNMismatchX(const SeqLib::BamRecord &bam) {
 int32_t IndelLen(const SeqLib::BamRecord &bam) {
   uint32_t *c = bam_get_cigar(bam.raw());
   int il = 0;
-  for (int i = 0; i < bam.raw()->core.n_cigar; ++i) {
+  for (unsigned i = 0; i < bam.raw()->core.n_cigar; ++i) {
     char cigar = bam_cigar_opchr(c[i]);
     if ( cigar == 'I' or cigar == 'D') {
       il += bam_cigar_oplen(c[i]);
@@ -391,9 +391,9 @@ bool HasClusteredMuts(const SeqLib::BamRecord &rec, const SeqLib::BamHeader& hea
       readpos += cit->Length();
     }
   }
-  int beg, end, n;
-  n = largest_cluster(mutpos, cutoff * dist, beg, end);
-  if (n >= cutoff) return true;
+  int beg = std::numeric_limits<int>::max(), end = 0;
+  int n = largest_cluster(mutpos, 30, beg, end);
+  if (n >= cutoff && (beg < dist || end + dist > rec.AlignmentEndPosition())) return true;
   else return false;
 }
 
@@ -401,7 +401,7 @@ int32_t NumSoftClip5End(const SeqLib::BamRecord &bam) {
   int32_t p = 0;
   uint32_t* c = bam_get_cigar(bam.raw());
   if (bam.ReverseFlag()) {
-    for (int i = bam.raw()->core.n_cigar - 1; i >=0; --i) {
+    for (unsigned i = bam.raw()->core.n_cigar - 1; i >=0; --i) {
       if (bam_cigar_opchr(c[i]) == 'S' ) {
         p = bam_cigar_oplen(c[i]);
       } else if (bam_cigar_opchr(c[i]) != 'H') {
@@ -409,7 +409,7 @@ int32_t NumSoftClip5End(const SeqLib::BamRecord &bam) {
       }
     }
   } else {
-    for (int i = 0; i < bam.raw()->core.n_cigar ; ++i) {
+    for (unsigned i = 0; i < bam.raw()->core.n_cigar ; ++i) {
       if (bam_cigar_opchr(c[i]) == 'S') {
         p = bam_cigar_oplen(c[i]);
       }else if (bam_cigar_opchr(c[i]) != 'H') {
@@ -590,7 +590,7 @@ int RefPosToQueryPos(const SeqLib::BamRecord &bam, const int refpos) {
   int32_t refscan = bam.PositionWithSClips();
   int32_t readscan = 0;
   uint32_t *c = bam_get_cigar(bam.raw());
-  for (int i = 0; i < bam.raw()->core.n_cigar; ++i) {
+  for (unsigned i = 0; i < bam.raw()->core.n_cigar; ++i) {
     char cigar = bam_cigar_opchr(c[i]);
     if ( cigar == 'M' || cigar  == 'S' || cigar == 'X' || cigar == '=') {
       refscan += bam_cigar_oplen(c[i]);
@@ -628,12 +628,33 @@ std::pair<int, int> GetPairOverlapRStartAndRStop(const SeqLib::BamRecord& fwd, c
   return std::make_pair(left, right);
 }
 
-int OverlapLenInRef(const std::vector<SeqLib::BamRecord>& seg) {
+int EffFragLen(const std::vector<SeqLib::BamRecord>& seg, int count_overhang) {
   if (seg.size() == 1) {
-    return seg[0].PositionEnd() - seg[0].Position();
+    return seg[0].AlignmentEndPosition() - seg[0].AlignmentPosition();
   } else {
-    auto res = GetPairOverlapRStartAndRStop(seg[0], seg[1]);
-    return res.second - res.first;
+    if (count_overhang == 2) {
+      return seg[0].AlignmentEndPosition() - seg[0].AlignmentPosition() + seg[1].AlignmentEndPosition() - seg[1].AlignmentPosition();
+    } else {
+      std::pair<int,int> r1,r2;
+      std::tie(r1, r2) = GetPairOverlapQStartAndQStop(seg[0], seg[1]);
+      if (count_overhang == 0) {
+        return r1.second - r1.first;
+      } else if (count_overhang == 1){
+        if (!IsPairOverlap(seg[0], seg[1])) {
+          return seg[0].AlignmentEndPosition() - seg[0].AlignmentPosition() + seg[1].AlignmentEndPosition() - seg[1].AlignmentPosition();
+        } else {
+          if (seg[0].ReverseFlag()) {
+            return r2.second - seg[1].AlignmentPosition() + seg[0].AlignmentEndPosition() - r1.second;
+          } else {
+            return r1.second - seg[0].AlignmentPosition() + seg[1].AlignmentEndPosition() - r2.second;
+          }
+        }
+      } else {
+        //should not reach here
+        assert(false);
+        return 0;
+      }
+    }
   }
 }
 

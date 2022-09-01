@@ -219,7 +219,9 @@ def alignment_analysis(bam, cdsm, trim_type, intermol_bam = None, im_dist_cutoff
     for read1, read2 in read_pair_generator(samfile):
         total_frag += 1
         if read1.is_unmapped or read2.is_unmapped:
-            cdsm.n_unmapped += 1
+            if read1.infer_query_length() and read1.infer_query_length() > 15 and \
+                    read2.infer_query_length() and read2.infer_query_length() > 15:
+                cdsm.n_unmapped += 1
             continue
 
         if read1.reference_name != read2.reference_name or abs(read1.tlen) > im_dist_cutoff:

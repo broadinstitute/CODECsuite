@@ -84,7 +84,7 @@ int RefPosToQueryPos(const SeqLib::BamRecord &bam, const int refpos);
 bool IsPairOverlap(const SeqLib::BamRecord& one, const SeqLib::BamRecord& two);
 
 std::pair<int, int> GetPairOverlapRStartAndRStop(const SeqLib::BamRecord& fwd, const SeqLib::BamRecord& rev);
-int OverlapLenInRef(const std::vector<SeqLib::BamRecord>&);
+int EffFragLen(const std::vector<SeqLib::BamRecord>&, int count_overhang);
 
 std::pair<std::pair<int,int>,std::pair<int,int>>
 GetPairOverlapQStartAndQStop(const SeqLib::BamRecord& fwd, const SeqLib::BamRecord& rev);

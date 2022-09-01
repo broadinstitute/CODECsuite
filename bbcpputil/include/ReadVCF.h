@@ -15,8 +15,8 @@ namespace cpputil {
 using BiAllele = std::pair<cpputil::Variant, cpputil::Variant>;
 
 class BCFReader {
-  bcf_srs_t *fp_;
   bcf_hdr_t *hdr_;
+  bcf_srs_t *fp_;
   std::string bcf_file_;
 
   void _Load(const char *bcf_file) {
@@ -292,7 +292,7 @@ class BCFReader {
       {
         int t = bcf_get_variant_type(rec, i);
         if (t == VCF_MNP or t == VCF_SNP) {
-          for (int j = 0; j< strlen(rec->d.allele[i]); ++j) {
+          for (unsigned j = 0; j< strlen(rec->d.allele[i]); ++j) {
             res.insert(rec->pos + j);
           }
         }

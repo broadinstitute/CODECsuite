@@ -48,10 +48,14 @@ struct ErrorStat {
   int n_filtered_largefrag = 0;
   int n_filtered_edit = 0;
   int n_filtered_clustered = 0;
-  int nindel_filtered_ajabaseq = 0;
-  int nindel_filtered_ajaN = 0;
+  int nindel_filtered_adjbaseq = 0;
+  int nindel_filtered_adjN = 0;
+  int nindel_filtered_adjvar = 0;
+  int nindel_filtered_overlap_snp = 0;
   int mismatch_filtered_by_indel = 0;
   int snv_family_disagree = 0;
+  int snv_R1R2_disagree = 0;
+  int indel_R1R2_disagree = 0;
   int lowconf_t2g = 0;
   int low_germ_depth = 0;
   int seen_in_germ = 0;
@@ -123,7 +127,7 @@ std::pair<int,int> CountValidBaseInMatchedBases(const SeqLib::BamRecord &b,
   for (; i < b.raw()->core.n_cigar; ++i) {
     char cigar = bam_cigar_opchr(c[i]);
     if (cigar == 'M' or cigar == 'X' or cigar == '=') {
-      for(int ww = 0; ww < bam_cigar_oplen(c[i]); ++ww) {
+      for(unsigned ww = 0; ww < bam_cigar_oplen(c[i]); ++ww) {
         cur = ww + readpos;
         if (cur <  qstart) continue;
         if (cur >= qend) break;
@@ -193,7 +197,7 @@ std::pair<int, int> CountValidBaseAndContextInMatchedBases(const SeqLib::BamReco
   for (; i < b.raw()->core.n_cigar; ++i) {
     char cigar = bam_cigar_opchr(c[i]);
     if (cigar == 'M' or cigar == '=' or cigar == 'X') {
-      for(int ww = 0; ww < bam_cigar_oplen(c[i]); ++ww) {
+      for(unsigned ww = 0; ww < bam_cigar_oplen(c[i]); ++ww) {
         cur = ww + readpos;
         if (cur <  qstart) continue;
         if (cur >= qend) break;
@@ -236,6 +240,149 @@ std::pair<int, int> CountValidBaseAndContextInMatchedBases(const SeqLib::BamReco
     }
   }
   return std::make_pair(res, q0res);
+}
+
+static std::pair<int,int> CountDenom(const cpputil::Segments& seg,
+                              const SeqLib::GenomicRegion* const gr,
+                              const SeqLib::RefGenome& ref,
+                              const string& chrname,
+                              const std::set<int>& blacklist,
+                              cpputil::ErrorStat& es,
+                              int minbq,
+                              std::pair<int, int>& nq0,
+                              bool count_context,
+                              int count_overhang,
+                              bool N_is_valid){
+  // blacklist represents a set of SNV positions that will not be counted in the error rate calculation
+  int r1 = 0, r2 = 0, r1q0 = 0, r2q0 = 0;
+  std::set<int> baseqblack;
+  if (seg.size() == 1) {
+    std::pair<int,int> range;
+    const auto& br = seg.front();
+    if (gr) {
+      range = cpputil::GetBamOverlapQStartAndQStop(br, *gr);
+    } else {
+      range.first = br.AlignmentPosition();
+      range.second = br.AlignmentEndPosition();
+    }
+    if (not br.PairedFlag() or br.FirstFlag()) {
+      if (count_context)
+        std::tie(r1,r1q0) = cpputil::CountValidBaseAndContextInMatchedBases(br, blacklist, chrname, ref, minbq, baseqblack, es, range.first, range.second, N_is_valid);
+      else
+        std::tie(r1, r1q0) = cpputil::CountValidBaseInMatchedBases(br, blacklist, minbq, baseqblack,range.first, range.second, N_is_valid);
+    }
+    else {
+      if (count_context)
+        std::tie(r2, r2q0) = cpputil::CountValidBaseAndContextInMatchedBases(br, blacklist, chrname, ref, minbq, baseqblack, es, range.first, range.second, N_is_valid);
+      else
+        std::tie(r2, r2q0) = cpputil::CountValidBaseInMatchedBases(br, blacklist, minbq, baseqblack, range.first, range.second, N_is_valid);
+    }
+  } else {
+    std::pair<int, int> overlap_front, overlap_back;
+    if (count_overhang == 1 && !IsPairOverlap(seg[0], seg[1])) {
+      count_overhang = 2;
+    }
+    if (gr) {
+      overlap_front = cpputil::GetBamOverlapQStartAndQStop(seg.front(), *gr);
+      overlap_back = cpputil::GetBamOverlapQStartAndQStop(seg.back(), *gr);
+    } else {
+      overlap_front.first = seg.front().AlignmentPosition();
+      overlap_front.second = seg.front().AlignmentEndPosition();
+      overlap_back.first = seg.back().AlignmentPosition();
+      overlap_back.second = seg.back().AlignmentEndPosition();
+    }
+    std::pair<int, int> range_front, range_back;
+    if (count_overhang == 2) {
+      range_front = overlap_front;
+      range_back = overlap_back;
+    } else {
+      std::tie(range_front, range_back) = cpputil::GetPairOverlapQStartAndQStop(seg.front(), seg.back());
+      range_front.first = std::max(range_front.first, overlap_front.first);
+      range_front.second = std::min(range_front.second, overlap_front.second);
+      range_back.first = std::max(range_back.first, overlap_back.first);
+      range_back.second = std::min(range_back.second, overlap_back.second);
+    }
+    if (seg.front().FirstFlag()) {
+      size_t r1_nmask;
+      if (count_context) {
+        if (count_overhang == 2) {
+          std::tie(r1, r1q0) = cpputil::CountValidBaseAndContextInMatchedBases(seg.front(), blacklist, chrname, ref, minbq, baseqblack, es, range_front.first, range_front.second, N_is_valid);
+        } else if (count_overhang == 1){
+          if (seg.front().ReverseFlag()) {
+            std::tie(r2, r2q0) = cpputil::CountValidBaseAndContextInMatchedBases(seg.back(), blacklist, chrname, ref, minbq, baseqblack, es, overlap_back.first, range_back.first, N_is_valid);
+            baseqblack.clear();
+            cpputil::CountValidBaseInMatchedBases(seg.back(), blacklist, minbq, baseqblack, range_back.first, range_back.second, N_is_valid); // for blacklist only
+          } else {
+            std::tie(r1, r1q0) = cpputil::CountValidBaseAndContextInMatchedBases(seg.front(), blacklist, chrname, ref, minbq, baseqblack, es, overlap_front.first, range_front.first, N_is_valid);
+            baseqblack.clear();
+            cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, baseqblack, range_front.first, range_front.second, N_is_valid); // for blacklist only
+          }
+        } else {
+          std::tie(r1, r1q0) = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, baseqblack, range_front.first, range_front.second, N_is_valid);
+        }
+        r1_nmask = baseqblack.size();
+        if (count_overhang == 2) baseqblack.clear();// when count_overhang is true, treat R1 and R2 independently
+        if (count_overhang == 1) {
+          if (seg.front().ReverseFlag()) {
+            std::tie(r1, r1q0) = cpputil::CountValidBaseAndContextInMatchedBases(seg.front(), blacklist, chrname, ref, minbq, baseqblack, es, range_front.first, range_front.second, N_is_valid);
+            std::set<int> baseqblack2;
+            auto r1_res = cpputil::CountValidBaseAndContextInMatchedBases(seg.front(), blacklist, chrname, ref, minbq, baseqblack2, es, range_front.second, overlap_front.second, N_is_valid);
+            r1 += r1_res.first;
+            r1q0 += r1_res.second;
+          } else {
+            std::tie(r2, r2q0) = cpputil::CountValidBaseAndContextInMatchedBases(seg.back(), blacklist, chrname, ref, minbq, baseqblack, es, range_back.first, range_back.second, N_is_valid);
+            std::set<int> baseqblack2;
+            auto r2_res = cpputil::CountValidBaseAndContextInMatchedBases(seg.back(), blacklist, chrname, ref, minbq, baseqblack2, es, range_back.second, overlap_back.second, N_is_valid);
+            r2 += r2_res.first;
+            r2q0 += r2_res.second;
+          }
+        } else {
+          std::tie(r2, r2q0) = cpputil::CountValidBaseAndContextInMatchedBases(seg.back(), blacklist, chrname, ref, minbq, baseqblack, es, range_back.first, range_back.second, N_is_valid);
+        }
+      }
+      else { // not count context
+        if (count_overhang == 1) {
+          if (seg.front().ReverseFlag()) {
+            std::tie(r2, r2q0) = cpputil::CountValidBaseInMatchedBases(seg.back(), blacklist, minbq, baseqblack, overlap_back.first, range_back.first, N_is_valid);
+            baseqblack.clear();
+            cpputil::CountValidBaseInMatchedBases(seg.back(), blacklist, minbq, baseqblack, range_back.first, range_back.second, N_is_valid);
+          }
+          else {
+            std::tie(r1, r1q0) = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, baseqblack, overlap_front.first, range_front.first, N_is_valid);
+            // for blacklist only
+            baseqblack.clear();
+            cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, baseqblack, range_front.first, range_front.second, N_is_valid);
+          }
+        } else {
+          std::tie(r1, r1q0) = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, baseqblack, range_front.first, range_front.second, N_is_valid);
+        }
+        r1_nmask = baseqblack.size();
+        if (count_overhang == 2) baseqblack.clear();
+        if (count_overhang == 1) {
+          if (seg.front().ReverseFlag()) {
+            std::tie(r1, r1q0) = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, baseqblack, range_front.first, range_front.second, N_is_valid);
+            std::set<int> baseqblack2;
+            auto r1_res = cpputil::CountValidBaseInMatchedBases(seg.front(), blacklist, minbq, baseqblack2, range_front.second, overlap_front.second, N_is_valid);
+            r1 += r1_res.first;
+            r1q0 += r1_res.second;
+          } else {
+            std::tie(r2, r2q0) = cpputil::CountValidBaseInMatchedBases(seg.back(), blacklist, minbq, baseqblack, range_back.first, range_back.second, N_is_valid);
+            std::set<int> baseqblack2;
+            auto r2_res = cpputil::CountValidBaseInMatchedBases(seg.back(), blacklist, minbq, baseqblack2, range_back.second, overlap_back.second, N_is_valid);
+            r2 += r2_res.first;
+            r2q0 += r2_res.second;
+          }
+        } else {
+          std::tie(r2, r2q0) = cpputil::CountValidBaseInMatchedBases(seg.back(), blacklist, minbq, baseqblack, range_back.first, range_back.second, N_is_valid);
+        }
+      }
+      if (count_overhang == 0) r1 -= baseqblack.size() - r1_nmask;
+    } else {
+      throw std::runtime_error("Read order wrong\n");
+    }
+  }
+  nq0 = std::make_pair(r1q0, r2q0);
+  return std::make_pair(r1, r2);
 }
 
 std::pair<int,int> NumEffectBases(const cpputil::Segments& seg, int minbq, bool count_overhang, bool N_is_valid) {
@@ -346,7 +493,7 @@ int FailFilter(const vector<cpputil::Segments>& frag,
   }
 
   if (seg->size() == 1 || (*seg)[0].InsertSize() == 0) {
-    if ((*seg)[0].NumMatchBases() < std::max(1, opt.min_fraglen)) {
+    if ((int) (*seg)[0].NumMatchBases() < std::max(1, opt.min_fraglen)) {
       ++errorstat.n_filtered_smallfrag;
       return 1;
     }
@@ -357,16 +504,18 @@ int FailFilter(const vector<cpputil::Segments>& frag,
     }
   }
 
-  olen = OverlapLenInRef(*seg);
-  auto qpass = NumEffectBases(*seg, opt.bqual_min, opt.count_read, false);
-  //auto qpass_n = NumEffectBases(*seg, 0, opt.count_read, false);
+  olen = EffFragLen(*seg, opt.count_read);
+  const std::set<int> blacklist;
+  std::pair<int, int> q0den(0, 0);
+  auto qpass = CountDenom(*seg, nullptr, ref, "", blacklist, errorstat, opt.bqual_min,
+                          q0den, false, opt.count_read, false);
 
   if (seg->size() == 2) {
     if (opt.filter_5endclip && (cpputil::NumSoftClip5End((*seg)[0]) > 0 || cpputil::NumSoftClip5End((*seg)[1]) > 0)) {
       ++errorstat.n_filtered_sclip;
       return 2;
     }
-    nqpass = std::min(qpass.first, qpass.second);
+    nqpass = opt.count_read? qpass.first + qpass.second : qpass.first;
     frag_numN = seg->front().CountNBases();
     frag_numN = std::max(frag_numN, seg->back().CountNBases());
   } else {
@@ -390,7 +539,7 @@ int FailFilter(const vector<cpputil::Segments>& frag,
 
   for (const auto &s: *seg) {
 
-    if (s.NumMatchBases() > opt.max_fraglen || abs(s.InsertSize()) > opt.max_fraglen) {
+    if ((int) s.NumMatchBases() > opt.max_fraglen || abs(s.InsertSize()) > opt.max_fraglen) {
       ++errorstat.n_filtered_largefrag;
       return 5;
     }
