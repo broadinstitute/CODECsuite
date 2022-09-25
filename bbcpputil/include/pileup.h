@@ -325,9 +325,9 @@ int GenotypeVariant(PileHandler *germbam,
                            const std::string& seq,
                            bool  handle_overlap,
                            int wiggle,
+                           float germ_min_vaf = 0.25,
                            int mindepth = 10,
-                           int minbq = 20,
-                           float germ_min_vaf = 0.25) {
+                           int minbq = 20) {
   /* INPUT
    * indel: 0 SNP, >0 INS, <0 DEL
    * seq: Inserted seq or SNV base
@@ -353,7 +353,9 @@ int GenotypeVariant(PileHandler *germbam,
       return -2;
     if (depth >= mindepth && alt_count > germ_min_vaf * depth)
       return 0;
+    if (germ_min_vaf >= 1.0) return depth;
 
+    // search nearby germline SNP when calling INDELs
     bam_mplp_t mplp = NULL;
     const bam_pileup1_t *pileups[1] = { NULL };
     int n_plp[1] = { 0 };
@@ -363,7 +365,6 @@ int GenotypeVariant(PileHandler *germbam,
       bam_mplp_destroy(mplp);
       return -2;
     }
-    // search overlapping germline SNP
     int slen = indel < 0 ? abs(indel) : 1;
     //std::cerr << "slen: " << slen << std::endl;
     for (int search = -wiggle; search < slen + wiggle; ++search) {

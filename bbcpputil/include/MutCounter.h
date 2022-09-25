@@ -55,6 +55,7 @@ struct ErrorStat {
   int mismatch_filtered_by_indel = 0;
   int snv_family_disagree = 0;
   int snv_R1R2_disagree = 0;
+  int snv_filtered_baseq = 0;
   int indel_R1R2_disagree = 0;
   int lowconf_t2g = 0;
   int low_germ_depth = 0;
@@ -519,7 +520,7 @@ int FailFilter(const vector<cpputil::Segments>& frag,
     frag_numN = seg->front().CountNBases();
     frag_numN = std::max(frag_numN, seg->back().CountNBases());
   } else {
-    if (opt.filter_5endclip && cpputil::NumSoftClip5End((*seg)[0]) > 0) {
+    if (opt.filter_5endclip && cpputil::NumSoftClip5End((*seg)[0]) > 1) {
       ++errorstat.n_filtered_sclip;
       return 2;
     }
@@ -563,7 +564,7 @@ int FailFilter(const vector<cpputil::Segments>& frag,
     bool xsstat = s.GetIntTag("XS", XS);
     bool asstat = s.GetIntTag("AS", AS);
     if (xsstat and asstat) {
-      if (XS > AS * opt.max_frac_prim_AS) {
+      if (XS >= AS * opt.max_frac_prim_AS) {
         ++errorstat.AS_filter;
         return 8;
       }

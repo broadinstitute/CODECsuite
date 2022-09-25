@@ -393,7 +393,7 @@ bool HasClusteredMuts(const SeqLib::BamRecord &rec, const SeqLib::BamHeader& hea
   }
   int beg = std::numeric_limits<int>::max(), end = 0;
   int n = largest_cluster(mutpos, 30, beg, end);
-  if (n >= cutoff && (beg < dist || end + dist > rec.AlignmentEndPosition())) return true;
+  if (n >= cutoff && (beg < dist || end + dist >= rec.AlignmentEndPosition())) return true;
   else return false;
 }
 
