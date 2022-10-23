@@ -52,7 +52,7 @@ const char*short_options = "b:5:3:T:mc";
 void print_help()
 {
   std::cerr<< "---------------------------------------------------\n";
-  std::cerr<< "Usage: consensus [options] -b a.bam\n";
+  std::cerr<< "Usage: trimbam [options] -b a.bam\n";
   std::cerr<< "General Options:\n";
   std::cerr<< "-b/--bam,                              input bam\n";
   std::cerr<< "-5/--trim5,                            Trim number of bases based on this option from the 5'end of the fragment (not read), by change them to N. [0]\n";

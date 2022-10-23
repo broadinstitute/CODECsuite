@@ -84,7 +84,7 @@ void consensus_print_help()
   std::cerr<< "-b/--bam,                              Input bam [required]\n";
   std::cerr<< "-o/--outbam,                           Output unmapped bamfile [required].\n";
   std::cerr<< "-m/--mapq,                             Min mapping quality [10].\n";
-  std::cerr<< "-q/--baseq,                            paired baseq calibration. If only one of the baseq < cutoff, make the other one baseq = cutoff -1. [0].\n";
+  std::cerr<< "-q/--baseq,                            If one of the baseq < cutoff, make all baseq = 2 so that VC will ingnore them. [0].\n";
   //Supplementary not support currently
   //std::cerr<< "-l/--load_supplementary,               Include supplementary alignment [false].\n";
   std::cerr<< "-t/--trim_overhang,                    When perform paired-end consensus, if true then only do consensus of the overlapped region [false].\n";

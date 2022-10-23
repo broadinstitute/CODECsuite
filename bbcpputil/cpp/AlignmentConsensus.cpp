@@ -194,12 +194,11 @@ std::pair<std::string, std::string> PairConsensus(const Segments &segs, const st
     qual_pileup[sid] = qual;
   }
   for (unsigned jj = 0; jj < consns_templ.size(); ++jj) {
-    // paired baseq calibration. If only one of the baseq < cutoff, make the other one baseq = cutoff -1
-    // so that when later we filter by baseq by this cutoff, they either both stay or both out
+    // paired baseq calibration. If one of the baseq < cutoff, make all baseq low enough so that VC will ingnore them
     if (dna_pileup[0][jj] >= 'A' && dna_pileup[1][jj] >= 'A'
         && std::min(qual_pileup[0][jj], qual_pileup[1][jj]) < static_cast<char>(33 + qcutoff)) {
-      qual_pileup[0][jj] = std::min(qual_pileup[0][jj], static_cast<char>(32 + qcutoff));
-      qual_pileup[1][jj] = std::min(qual_pileup[1][jj], static_cast<char>(32 + qcutoff));
+      qual_pileup[0][jj] = static_cast<char>(35);
+      qual_pileup[1][jj] = static_cast<char>(35);
     }
     if (dna_pileup[0][jj] == '.' or dna_pileup[1][jj] == '.') { // overhang
       if (not trim_overhang) {

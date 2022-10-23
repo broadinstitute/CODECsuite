@@ -48,6 +48,7 @@ struct ErrorStat {
   int n_filtered_largefrag = 0;
   int n_filtered_edit = 0;
   int n_filtered_clustered = 0;
+  int n_filtered_badcigar = 0;
   int nindel_filtered_adjbaseq = 0;
   int nindel_filtered_adjN = 0;
   int nindel_filtered_adjvar = 0;
@@ -241,6 +242,27 @@ std::pair<int, int> CountValidBaseAndContextInMatchedBases(const SeqLib::BamReco
     }
   }
   return std::make_pair(res, q0res);
+}
+
+static int NumHighBQ(const SeqLib::BamRecord& b, const int cutoff) {
+  int numHQ = 0;
+  std::string orig_qual;
+//  const uint8_t * bq = NULL;
+//  if (b.GetZTag("OQ", orig_qual)) {
+//    bq = reinterpret_cast<const uint8_t*>(&orig_qual[0]);
+//
+//
+//  } else {
+  //}
+  const uint8_t*  bq = bam_get_qual(b.raw());
+  if (!bq)
+    return 0;
+  for (int32_t i = 0; i < b.raw()->core.l_qseq; ++i) {
+    if (bq[i] >= cutoff) {
+      ++numHQ;
+    }
+  }
+  return numHQ;
 }
 
 static std::pair<int,int> CountDenom(const cpputil::Segments& seg,
@@ -457,7 +479,7 @@ int FailFilter(const vector<cpputil::Segments>& frag,
                     bool paired_only,
                     bool indel_calls_only,
                     int& frag_numN,
-                    int& nqpass,
+                    float& nqpass,
                     int& olen) {
   /*
    * Pass =0, >0 fail mode
@@ -492,6 +514,12 @@ int FailFilter(const vector<cpputil::Segments>& frag,
     }
     throw std::runtime_error("Unexpected #reads for a fragment");
   }
+  if (frag.size() == 2 and opt.count_read == 0) {
+    if (not cpputil::IsPairOverlap((*seg)[0], (*seg)[1])) {
+      ++errorstat.n_filtered_largefrag;
+      return 5;
+    }
+  }
 
   if (seg->size() == 1 || (*seg)[0].InsertSize() == 0) {
     if ((int) (*seg)[0].NumMatchBases() < std::max(1, opt.min_fraglen)) {
@@ -508,15 +536,15 @@ int FailFilter(const vector<cpputil::Segments>& frag,
   olen = EffFragLen(*seg, opt.count_read);
   const std::set<int> blacklist;
   std::pair<int, int> q0den(0, 0);
-  auto qpass = CountDenom(*seg, nullptr, ref, "", blacklist, errorstat, opt.bqual_min,
-                          q0den, false, opt.count_read, false);
+  //auto qpass = CountDenom(*seg, nullptr, ref, "", blacklist, errorstat, opt.bqual_min,
+  //                        q0den, false, opt.count_read, false);
 
   if (seg->size() == 2) {
     if (opt.filter_5endclip && (cpputil::NumSoftClip5End((*seg)[0]) > 0 || cpputil::NumSoftClip5End((*seg)[1]) > 0)) {
       ++errorstat.n_filtered_sclip;
       return 2;
     }
-    nqpass = opt.count_read? qpass.first + qpass.second : qpass.first;
+    nqpass = (float) (NumHighBQ((*seg)[0], opt.bqual_min) + NumHighBQ((*seg)[1], opt.bqual_min)) / ((*seg)[0].Length() + (*seg)[1].Length());
     frag_numN = seg->front().CountNBases();
     frag_numN = std::max(frag_numN, seg->back().CountNBases());
   } else {
@@ -524,11 +552,11 @@ int FailFilter(const vector<cpputil::Segments>& frag,
       ++errorstat.n_filtered_sclip;
       return 2;
     }
-    nqpass = std::max(qpass.first, qpass.second);
+    nqpass = (float) NumHighBQ((*seg)[0], opt.bqual_min) / (*seg)[0].Length();
     frag_numN = seg->front().CountNBases();
   }
 
-  if (nqpass < olen * opt.min_passQ_frac) {
+  if (nqpass < opt.min_passQ_frac) {
     ++errorstat.n_filtered_q30rate;
     return 3;
   }
@@ -556,7 +584,7 @@ int FailFilter(const vector<cpputil::Segments>& frag,
     }
 
     if (HasBadCigar(s)) {
-      ++errorstat.AS_filter;
+      ++errorstat.n_filtered_badcigar;
       return 9;
     }
 
@@ -564,7 +592,7 @@ int FailFilter(const vector<cpputil::Segments>& frag,
     bool xsstat = s.GetIntTag("XS", XS);
     bool asstat = s.GetIntTag("AS", AS);
     if (xsstat and asstat) {
-      if (XS >= AS * opt.max_frac_prim_AS) {
+      if (XS > AS * opt.max_frac_prim_AS) {
         ++errorstat.AS_filter;
         return 8;
       }

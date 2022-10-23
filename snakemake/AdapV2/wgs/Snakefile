@@ -1,6 +1,6 @@
 include: "../Snakefile"
 TRUTH_BCF= config['bcf']
-EAVL_REGION_BED= config['region_bed']
+EVAL_REGION_BED= config['region_bed']
 EVAL_REGION_IL= config['region_interval_list']
 DBSNP= config['dbsnp']
 
@@ -21,7 +21,8 @@ rule CollectRawWgsMetrics:
           itl = EVAL_REGION_IL
     shell:
          """
-         {PICARD} CollectWgsMetrics I={input.bam} O={output.metrics} R={params.ref} INTERVALS={params.itl} INCLUDE_BQ_HISTOGRAM=true
+         {PICARD} CollectWgsMetrics I={input.bam} O={output.metrics} R={params.ref} INTERVALS={params.itl} \
+         INCLUDE_BQ_HISTOGRAM=true
          """
 
 rule CollectWgsMetrics:
@@ -34,7 +35,8 @@ rule CollectWgsMetrics:
           itl = EVAL_REGION_IL
     shell:
          """
-         {PICARD} CollectWgsMetrics I={input.bam} O={output.metrics} R={params.ref} INTERVALS={params.itl} INCLUDE_BQ_HISTOGRAM=true
+         {PICARD} CollectWgsMetrics I={input.bam} O={output.metrics} R={params.ref} INTERVALS={params.itl} \
+         INCLUDE_BQ_HISTOGRAM=true
          """
 
 rule CollectFinalWgsMetrics:
@@ -60,7 +62,7 @@ rule CDSErrorMetrics:
           context = ACCU_OUT + "/{index}.context_count.txt",
     params:
           ref = REF,
-          high_conf_region = EAVL_REGION_BED,
+          high_conf_region = EVAL_REGION_BED,
           dbsnp = DBSNP,
           #germ_vcf = lambda wildcards : sample_to_vcf.loc[wildcards.index]['germline_vcf'],
           germ_bam = lambda wildcards : sample_to_germbam.loc[wildcards.index]['germline_bam'],
@@ -77,17 +79,16 @@ rule CDSErrorMetrics:
                 -q 30 \
                 -d 12 \
                 -V {params.dbsnp} \
-                -x 6 \
-                -c 3 \
+                -x 10 \
+                -c 6 \
                 -5 \
                 -g 30 \
                 -G 250 \
-                -Q 0.5 \
+                -Q 0.7 \
                 -B 0.6 \
                 -N 0.1 \
                 -Y 5 \
                 -W 1 \
-                --min_passQ_frac_TT 0.6 \
                 -a {output.accu} \
                 -e {output.error} \
                 -C {output.context} \
@@ -102,7 +103,7 @@ rule RawCDSErrorMetrics:
           context = "raw_accu/{index}.context_count.txt",
     params:
           ref = REF,
-          high_conf_region = EAVL_REGION_BED,
+          high_conf_region = EVAL_REGION_BED,
           dbsnp = DBSNP,
           #germ_vcf = lambda wildcards : sample_to_vcf.loc[wildcards.index]['germline_vcf'],
           germ_bam = lambda wildcards : sample_to_germbam.loc[wildcards.index]['germline_bam'],

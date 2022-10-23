@@ -87,12 +87,12 @@ struct AccuOptions {
   float min_passQ_frac = 0;
   bool filter_5endclip = false;
   int max_N_filter = MYINT_MAX;
-  int max_snv_filter = 10;
+  int max_snv_filter = MYINT_MAX;
   int min_fraglen = 30;
   int max_fraglen = MYINT_MAX;
   int verbose = 0;
   int clustered_mut_cutoff = MYINT_MAX;
-  float max_frac_prim_AS = 1.0;
+  float max_frac_prim_AS = std::numeric_limits<float>::max();
   int germline_minalt = 1;
   int germline_minmapq = 20;
   int germline_mindepth = 5;
@@ -207,7 +207,7 @@ void accuracy_print_help()
   std::cerr<< "-q/--bqual_min,                        Skip bases if min(q1, q2) < this when calculating error rate. q1, q2 are baseQ from R1 and R2 respectively [20].\n";
   std::cerr<< "-m/--mapq,                             min mapping quality [20].\n";
   std::cerr<< "-Q/--min_passQ_frac,                   Filter out a read if the fraction of bases passing quality threshold (together with -q) is less than this number [0].\n";
-  std::cerr<< "-x/--max_snv_filter,                   Skip a read if the number of mismatch bases is larger than this value [10].\n";
+  std::cerr<< "-x/--max_snv_filter,                   Skip a read if the number of mismatch bases is larger than this value [INT_MAX].\n";
   std::cerr<< "-y/--max_N_filter,                     Skip a read if its num of N bases is larger than this value [INT_MAX].\n";
   std::cerr<< "-d/--fragend_dist_filter,              Consider a variant if its distance to the fragment end is at least this value [0].\n";
 //  std::cerr<< "-F/--max_mismatch_frac,                Filter out a read if its mismatch fraction is larger than this value  [1.0].\n";
@@ -432,7 +432,7 @@ int n_true_mut(vector<bool> v) {
 
 void ErrorRateDriver(vector<cpputil::Segments>& frag,
                     const int frag_numN,
-                    const int nqpass,
+                    const float nqpass,
                     int olen,
                     const SeqLib::BamHeader& bamheader,
                     const SeqLib::RefGenome& ref,
@@ -610,7 +610,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
           for (;idx < ar.n; ++idx) {
             if (ar.a[idx].secondary >= 0) {
               sec_as = std::max(sec_as, ar.a[idx].score);
-              if (ar.a[idx].score >= primary_score * opt.max_frac_prim_AS) {
+              if (ar.a[idx].score > primary_score * opt.max_frac_prim_AS) {
                 break;
               }
             }
@@ -837,7 +837,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
               continue;
             }
             if (avars[ai].MutType() == "T>G" and opt.min_passQ_frac_TT > 0) {
-                  if (avars[ai].DoubletContext(ref) == "TT" and (float) nqpass < olen * opt.min_passQ_frac_TT) {
+                  if (avars[ai].DoubletContext(ref) == "TT" and nqpass < opt.min_passQ_frac_TT) {
                     ++errorstat.lowconf_t2g;
                     continue;
                   }
@@ -915,7 +915,6 @@ int codec_accuracy(int argc, char ** argv) {
       opt.mapq = 60;
       opt.bqual_min = 30;
       opt.fragend_dist_filter = 12;
-      opt.min_passQ_frac_TT = 0.6;
       opt.min_passQ_frac = 0.5;
       opt.filter_5endclip = true;
       opt.max_snv_filter = 10;
@@ -1053,15 +1052,17 @@ int codec_accuracy(int argc, char ** argv) {
   vector<vector<cpputil::Segments>> chunk;
   std::unordered_set<std::string> pass_qnames;
   int last_chrom = -1;
+  int last_end = 0;
   cpputil::UniqueQueue readpair_cnt(100000);
   cpputil::UniqueQueue failed_cnt(100000);
   for (unsigned i = 0; i < tl.NumRegion(); ++i) {
     const auto& gr = tl[i];
-    if (gr.chr != last_chrom) {
+    if (gr.chr != last_chrom || gr.pos1 - last_end > 1e4) {
       last_chrom = gr.chr;
       readpair_cnt.clearQueue();
       failed_cnt.clearQueue();
     }
+    last_end = gr.pos2;
     if (i % 100000 == 0) {
       auto timenow = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
       std::cerr << i + 1 << " region processed. Last position: " << gr << std::ctime(&timenow) << std::endl;
@@ -1081,7 +1082,8 @@ int codec_accuracy(int argc, char ** argv) {
           continue;
         }
 
-        int frag_numN, nqpass, olen;
+        int frag_numN, olen;
+        float nqpass;
         int fail = cpputil::FailFilter(frag, isf.bamheader(), ref, opt, errorstat, isf.IsPairEndLib() & !opt.load_unpair, opt.indel_calls_only, frag_numN, nqpass, olen);
         if (fail) {
           failed_cnt.add(frag[0][0].Qname());
@@ -1130,7 +1132,7 @@ int codec_accuracy(int argc, char ** argv) {
                            "n_indel_masked_by_vcf1",
                            "n_snv_masked_by_maf",
                            "n_indel_masked_by_maf",
-                           "n_totalpairs",
+                           "n_totalfrag",
                            "n_pass_filter_pair_seg",
                            "n_pass_filter_single_seg",
                            "n_filtered_total",
@@ -1142,6 +1144,7 @@ int codec_accuracy(int argc, char ** argv) {
                            "n_filtered_edit",
                            "n_filtered_clustered",
                            "n_filtered_AS",
+                           "n_filtered_badcigar",
                            "mut_germ_lowdepth",
                            "mut_germ_seen",
                            "nsnv_R1R2_disagree",
@@ -1193,6 +1196,7 @@ int codec_accuracy(int argc, char ** argv) {
        << errorstat.n_filtered_edit << '\t'
       << errorstat.n_filtered_clustered << '\t'
       << errorstat.AS_filter << '\t'
+      << errorstat.n_filtered_badcigar << '\t'
       << errorstat.low_germ_depth << '\t'
        << errorstat.seen_in_germ << '\t'
       << errorstat.snv_R1R2_disagree << '\t'
@@ -1214,7 +1218,7 @@ int codec_accuracy(int argc, char ** argv) {
     int64_t r1_den = errorstat.qcut_neval[qcut].first;
     int64_t r2_den = errorstat.qcut_neval[qcut].second;
     stat << r1_den << '\t';
-    stat << r2_den << '\t';
+    stat << r2_den;
     if (ii == errorstat.cutoffs.size())  stat << '\n';
     else stat << '\t';
   }
