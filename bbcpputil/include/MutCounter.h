@@ -11,6 +11,7 @@
 #include "SeqLib/RefGenome.h"
 #include "DNAUtils.h"
 #include "BamRecordExt.h"
+#include "AlignmentConsensus.h"
 
 namespace cpputil{
 static int PAD_5 = 5;
@@ -41,15 +42,18 @@ struct ErrorStat {
   //qscore cutoff -> read1, read2
   std::map<int, std::pair<int64_t, int64_t>> qcut_neval;
   std::map<int, std::pair<int64_t, int64_t>> qcut_nerrors;
+  int n_filtered_by_mapq = 0;
   int n_filtered_sclip = 0;
-  int n_filtered_Nrate = 0;
+  int n_filtered_numN = 0;
   int n_filtered_q30rate = 0;
+  int n_filtered_pairmismatch_rate = 0;
   int n_filtered_smallfrag = 0;
   int n_filtered_largefrag = 0;
   int n_filtered_edit = 0;
   int n_filtered_clustered = 0;
   int n_filtered_badcigar = 0;
   int nindel_filtered_adjbaseq = 0;
+  int nindel_near_readend = 0;
   int nindel_filtered_adjN = 0;
   int nindel_filtered_adjvar = 0;
   int nindel_filtered_overlap_snp = 0;
@@ -408,6 +412,23 @@ static std::pair<int,int> CountDenom(const cpputil::Segments& seg,
   return std::make_pair(r1, r2);
 }
 
+std::tuple<int,int, int> NumMisMatchOrLowQualityInOverlapRegion(const cpputil::Segments& seg, uint8_t minbq) {
+  int nmis = 0, nlowbaseq=0, noverlap = 0;
+  std::vector<std::string> dna_pileup, qual_pileup;
+  std::tie(dna_pileup, qual_pileup) = GetPairPileup(seg);
+
+  for (unsigned jj = 0; jj < dna_pileup[0].size(); ++jj) {
+    if (dna_pileup[0][jj] != '.' and dna_pileup[1][jj] != '.') {
+      if ( dna_pileup[0][jj] >= 'A' and dna_pileup[1][jj] >= 'A') {
+        if (dna_pileup[0][jj] != dna_pileup[1][jj] or dna_pileup[0][jj] == 'N' or dna_pileup[1][jj] == 'N') ++nmis;
+        if (qual_pileup[0][jj] < minbq + 33 or qual_pileup[1][jj] < minbq + 33) ++nlowbaseq;
+        ++noverlap;
+      }
+    }
+  }
+  return std::make_tuple(nmis, nlowbaseq, noverlap);
+}
+
 std::pair<int,int> NumEffectBases(const cpputil::Segments& seg, int minbq, bool count_overhang, bool N_is_valid) {
   // blacklist represents a set of SNV positions that will not be counted in the error rate calculation
   int r1 = 0, r2 = 0, r1q0 = 0, r2q0 = 0;
@@ -477,26 +498,12 @@ int FailFilter(const vector<cpputil::Segments>& frag,
                const Options& opt,
                ErrorStat& errorstat,
                     bool paired_only,
-                    bool indel_calls_only,
-                    int& frag_numN,
+                    int& nmis,
                     float& nqpass,
                     int& olen) {
   /*
    * Pass =0, >0 fail mode
    */
-  if (indel_calls_only) {
-    bool has_indel = false;
-    for (const auto &seg: frag) {
-      for (const auto &r : seg)
-      if (IndelLen(r) > 0) {
-        has_indel = true;
-        break;
-      }
-    }
-    if (not has_indel) {
-      return 888;
-    }
-  }
   Segments const *seg = nullptr;
   if (frag.size() == 1) {
     seg = &frag[0];
@@ -539,20 +546,49 @@ int FailFilter(const vector<cpputil::Segments>& frag,
   //auto qpass = CountDenom(*seg, nullptr, ref, "", blacklist, errorstat, opt.bqual_min,
   //                        q0den, false, opt.count_read, false);
 
+  int nfrag_bases = 0, frag_numN;
   if (seg->size() == 2) {
+    if ((*seg)[0].MapQuality() < opt.mapq || (*seg)[1].MapQuality() < opt.mapq) {
+      ++errorstat.n_filtered_by_mapq;
+      return 11;
+    }
     if (opt.filter_5endclip && (cpputil::NumSoftClip5End((*seg)[0]) > 0 || cpputil::NumSoftClip5End((*seg)[1]) > 0)) {
       ++errorstat.n_filtered_sclip;
       return 2;
     }
-    nqpass = (float) (NumHighBQ((*seg)[0], opt.bqual_min) + NumHighBQ((*seg)[1], opt.bqual_min)) / ((*seg)[0].Length() + (*seg)[1].Length());
-    frag_numN = seg->front().CountNBases();
-    frag_numN = std::max(frag_numN, seg->back().CountNBases());
+    nfrag_bases = (*seg)[0].Length() + (*seg)[1].Length();
+    frag_numN = seg->front().CountNBases() + seg->back().CountNBases();
+    if (opt.standard_ngs_filter) {
+      nqpass = (float) (NumHighBQ((*seg)[0], opt.bqual_min) + NumHighBQ((*seg)[1], opt.bqual_min)) / nfrag_bases;
+      nmis = frag_numN;
+    } else {
+      int nlowbaseq=0, noverlap;
+      nmis = 0;
+      std::tie(nmis, nlowbaseq, noverlap) = NumMisMatchOrLowQualityInOverlapRegion(*seg, opt.bqual_min);
+      nqpass = 1 - (float) nlowbaseq / noverlap;
+      if ((float) nmis / noverlap > opt.max_pair_mismatch_frac) {
+        ++errorstat.n_filtered_pairmismatch_rate;
+        return 4;
+      }
+    }
   } else {
+    if ((*seg)[0].MapQuality() < opt.mapq) {
+      ++errorstat.n_filtered_by_mapq;
+      return 11;
+    }
+    int mq;
+    if ((*seg)[0].GetIntTag("MQ", mq)) {
+      if (mq < opt.mapq) {
+        ++errorstat.n_filtered_by_mapq;
+        return 11;
+      }
+    }
     if (opt.filter_5endclip && cpputil::NumSoftClip5End((*seg)[0]) > 1) {
       ++errorstat.n_filtered_sclip;
       return 2;
     }
-    nqpass = (float) NumHighBQ((*seg)[0], opt.bqual_min) / (*seg)[0].Length();
+    nfrag_bases = (*seg)[0].Length();
+    nqpass = (float) NumHighBQ((*seg)[0], opt.bqual_min) / nfrag_bases;
     frag_numN = seg->front().CountNBases();
   }
 
@@ -561,9 +597,9 @@ int FailFilter(const vector<cpputil::Segments>& frag,
     return 3;
   }
 
-  if (frag_numN > abs(seg->front().InsertSize()) * opt.max_N_frac || frag_numN > opt.max_N_filter) {
-    ++errorstat.n_filtered_Nrate;
-    return 4;
+  if (frag_numN > opt.max_N_filter) {
+    ++errorstat.n_filtered_numN;
+    return 10;
   }
 
   for (const auto &s: *seg) {

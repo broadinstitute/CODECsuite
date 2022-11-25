@@ -34,6 +34,7 @@ std::pair<std::string, std::string>
 
 std::string MergePairSeq(const Segments &segs, const std::vector<std::string>& seqs, bool trim_overhang);
 std::string MergePair(const Segments &segs, bool trim_overhang);
+std::pair<std::vector<std::string>, std::vector<std::string>> GetPairPileup(const Segments &segs);
 
 std::pair<std::string, std::string> PairConsensus(const Segments &segs, const std::vector<std::string>& seqs,
                                               bool trim_overhang, int qcutoff, std::vector<std::string>& out_quals);

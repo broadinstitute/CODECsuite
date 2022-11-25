@@ -57,7 +57,7 @@ if (NOT TARGET spoa)
 endif ()
 
 set(deps bbcpputil/cpp/AlignmentConsensus.cpp bbcpputil/cpp/BamRecordExt.cpp)
-set(subcommand demux.cpp trimadapter.cpp consensus.cpp accuracy.cpp filter.cpp)
+set(subcommand demux.cpp trimadapter.cpp consensus.cpp accuracy.cpp)
 if (CMAKE_BUILD_TYPE MATCHES Debug)
     message(" ")
     message("CMAKE IN DEBUG MODE")

@@ -190,7 +190,13 @@ int codec_consensus(int argc, char ** argv) {
   std::system(samsort.c_str());
   std::cout << "sorting done" << std::endl;
 
-  cpputil::InsertSeqFactory isf(temp, opt.mapq, opt.load_supplementary, opt.load_secondary, true, opt.clip3);
+  cpputil::InsertSeqFactory isf(temp,
+                                opt.mapq,
+                                opt.load_supplementary,
+                                opt.load_secondary,
+                                true,
+                                !opt.allow_nonoverlapping_pair,
+                                opt.clip3);
   cpputil::UnMappedBamWriter writer(opt.outbam, isf.bamheader());
   int64_t read_counter = 0;
   if (opt.consensus_mode == 0) {

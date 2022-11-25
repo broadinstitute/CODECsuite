@@ -243,8 +243,8 @@ static int ScanIndel(PileHandler *input,
     }
 
     cnt_found = 0;
-    int pos, n=0, exact_match=0;
-    int nnondel=0, ndel=0;
+    int pos, n=0, d=0, exact_match=0;
+    int nindel=0;
     //std::cerr << "search: " << search << "\t" << "tpos: " << tpos << std::endl;
     while ((n = bam_mplp_auto(mplp, &tid, &pos, n_plp, pileups)) > 0) {
       if (tid < 0) break;
@@ -259,26 +259,16 @@ static int ScanIndel(PileHandler *input,
       for (int j = 0; j  < n_plp[0]; ++j) {
         const bam_pileup1_t *pi = pileups[0] + j;
         uint8_t *qq = bam_get_qual(pi->b);
+        if (qq[pi->qpos] < minbq or pi->is_refskip)  continue;
+        ++d;
 
-        if (search == 0) { // get depth
-          if (not pi->is_del and not pi->is_refskip) {
-            if (pi->qpos < pi->b->core.l_qseq) {
-              if (qq[pi->qpos] >= minbq) {
-                ++depth;
-              }
-            }
-          } else if (pi->is_del) {
-            if (qq[pi->qpos] >= minbq)
-              ++depth;
-          }
-        }
-
-        if (pi->indel != 0 && qq[pi->qpos] > minbq) {
+        if (pi->indel != 0) {
           //std::cerr << pi->indel <<std::endl;
           if (pi->qpos < pi->b->core.l_qseq) {
             if (pi->indel < 0) {
               if (indel == pi->indel && search == 0) ++exact_match;
               if (indel < 0) ++cnt_found;
+              else if(indel > 0) ++nindel;
             } else {
               std::string inseq(pi->indel, '.');
               for (int32_t i = 0; i < pi->indel; ++i) {
@@ -287,23 +277,24 @@ static int ScanIndel(PileHandler *input,
               }
               if (indel == pi->indel && inseq == seq) ++exact_match;
               if (indel > 0) ++cnt_found;
+              else if(indel < 0) ++nindel;
             }
           }
         } else {
           //if nearby has a DEL
-          if (pi->is_del) ++ndel;
-          else if (not pi->is_refskip) ++nnondel;
+          if (pi->is_del) ++nindel;
         }
       }
       //printf("%s\t%d\t%d\t%d\t%d\n", input->fp_hdr->target_name[tid], pos+1, n_plp[0], nuc_cnt, non_del_cnt);
     }
+    if (search == 0) depth = d;
     if (n < 0) {
       fprintf(stderr, "bam_plp_auto failed for \"%s\"\n", input->fname.c_str());
       return -1;
     }
-    if (ndel + nnondel >= 10 and ndel > 0.2 * (ndel + nnondel)) {
+    if (d >= 10 and nindel > 0.2 * d) {
       bam_mplp_destroy(mplp);
-      cnt_found = ndel;
+      cnt_found = nindel;
       return depth;
     }
     if (cnt_found > 1 || exact_match > 0) {
@@ -329,7 +320,7 @@ int GenotypeVariant(PileHandler *germbam,
                            int mindepth = 10,
                            int minbq = 20) {
   /* INPUT
-   * indel: 0 SNP, >0 INS, <0 DEL
+   * 0 SNP, >0 INS, <0 DEL
    * seq: Inserted seq or SNV base
    * RETURN
    * -1: INDEL overlap germline
@@ -383,7 +374,7 @@ int GenotypeVariant(PileHandler *germbam,
 
       int non_skip_cnt = 0;
       int pos, n=0, exact_match=0;
-      std::map<char, int> nuc_cnt;
+      std::map<int, int> nuc_cnt;
       //std::cerr << "search: " << search << "\t" << "tpos: " << tpos << std::endl;
       std::string refbase = ref.QueryRegion(chrom, tpos+search, tpos+search);
       while ((n = bam_mplp_auto(mplp, &tid, &pos, n_plp, pileups)) > 0) {
@@ -408,7 +399,12 @@ int GenotypeVariant(PileHandler *germbam,
               ++non_skip_cnt;
               if (!pi->is_del) {
                 char cc = seq_nt16_str[bam_seqi(bam_get_seq(pi->b), pi->qpos)];
-                ++nuc_cnt[cc];
+                if (pi->indel != 0) {
+                  ++nuc_cnt[pi->indel];
+                  if (cc != refbase[0]) ++nuc_cnt[(int)cc + 128];
+                } else {
+                  ++nuc_cnt[(int)cc + 128]; // avoid overlap between nuc ascii and indels
+                }
               }
             }
           }
@@ -421,7 +417,7 @@ int GenotypeVariant(PileHandler *germbam,
         return -2;
       }
       int max=0, secmax=0;
-      char maxbase = 0, secmaxbase = 0;
+      int maxbase = 0, secmaxbase = 0;
       for (auto const& it: nuc_cnt) {
         if (it.second > max) {
           secmax = max;
@@ -436,8 +432,9 @@ int GenotypeVariant(PileHandler *germbam,
 //      std::cerr << "max: " << maxbase <<", " << max << std::endl;
 //      std::cerr << "sec max: " << secmaxbase <<", " << secmax << std::endl;
 //      std::cerr << "non_skip_count " << non_skip_cnt << std::endl;
-      if ((non_skip_cnt >= mindepth && max > 0 && maxbase != refbase[0] && max > non_skip_cnt * germ_min_vaf) ||
-          (non_skip_cnt >= mindepth && secmax > 0 && secmaxbase != refbase[0] && secmax > non_skip_cnt * germ_min_vaf)) {
+      int refint = (int) refbase[0] + 128;
+      if ((non_skip_cnt >= mindepth && max > 0 && maxbase != refint && max > non_skip_cnt * germ_min_vaf) ||
+          (non_skip_cnt >= mindepth && secmax > 0 && secmaxbase != refint && secmax > non_skip_cnt * germ_min_vaf)) {
         bam_mplp_destroy(mplp);
         return -1;
       }

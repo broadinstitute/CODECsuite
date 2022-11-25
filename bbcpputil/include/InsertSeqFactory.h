@@ -37,6 +37,7 @@ class InsertSeqFactory {
   bool load_supp_;
   bool load_secondary_;
   bool load_duplicate_;
+  bool load_proper_pair_only_;
   bool clip3_ = false;
   int last_chr_;
   bool finished_ = false;
@@ -47,6 +48,7 @@ class InsertSeqFactory {
     if (!load_supp_ && b.SupplementaryFlag()) return false;
     if (!load_secondary_ && b.SecondaryFlag()) return false;
     if (!load_duplicate_ && b.DuplicateFlag()) return false;
+    if (load_proper_pair_only_ && !b.ProperPair()) return false;
     if (b.MapQuality() < min_mapq_) return false;
     return true;
   }
@@ -128,11 +130,12 @@ class InsertSeqFactory {
   //InsertSeqFactory() = delete;
   InsertSeqFactory() = default;
 
-  InsertSeqFactory(const std::string &bam, int mapq, bool load_supp, bool load_sec, bool load_duplicate, bool clip3):
+  InsertSeqFactory(const std::string &bam, int mapq, bool load_supp, bool load_sec, bool load_duplicate, bool load_proper_pair_only, bool clip3):
       min_mapq_(mapq),
       load_supp_(load_supp),
       load_secondary_(load_sec),
       load_duplicate_(load_duplicate),
+      load_proper_pair_only_(load_proper_pair_only),
       clip3_(clip3),
       last_chr_(-1) {
     bam_reader_.Open(bam);

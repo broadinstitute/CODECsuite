@@ -168,6 +168,31 @@ std::pair<std::string, std::string> PairSeqConsensus(const Segments &seg, bool t
   return seq;
 }
 
+std::pair<std::vector<std::string>, std::vector<std::string>> GetPairPileup(const Segments &segs) {
+  assert(segs.size() == 2);
+  const char NUL = 6;
+  int ref_most_left;
+  const std::string consns_templ = GetConsensusTemplate(segs, ref_most_left);
+  std::vector<std::string> seqs;
+  for (auto&s : segs) {
+    seqs.push_back(s.Sequence());
+  }
+  std::string consns_seq1(consns_templ.size(), NUL);
+  std::string consns_seq2(consns_templ.size(), NUL);
+  int32_t start = 0;
+  std::string dnaseq, qual;
+  std::vector<std::string> dna_pileup(segs.size());
+  std::vector<std::string> qual_pileup(segs.size());
+  for (unsigned sid = 0; sid < segs.size(); ++sid) {
+    auto const& seg = segs[sid];
+    start = seg.PositionWithSClips() - ref_most_left;
+    std::tie(dnaseq, qual) = GetGappedSeqAndQual(seg, seqs[sid], start, consns_templ);
+    dna_pileup[sid] = dnaseq;
+    qual_pileup[sid] = qual;
+  }
+  return std::make_pair(dna_pileup, qual_pileup);
+}
+
 std::pair<std::string, std::string> PairConsensus(const Segments &segs, const std::vector<std::string>& seqs,
     bool trim_overhang, int qcutoff, std::vector<std::string>& out_quals) {
   //seqs should hold the fastq seq for segs. They could be same length but different seqs
