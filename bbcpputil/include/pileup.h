@@ -198,14 +198,19 @@ static int ScanAllele(PileHandler *input, std::string chrom,
 }
 
 static int ScanIndel(PileHandler *input,
-                      const std::string& chrom,
+                     bool diff_bam,
+                     const SeqLib::RefGenome& ref,
+                     const std::string& chrom,
                       int tpos,
                       int indel,
                       const std::string& seq,
                       bool  handle_overlap,
                       int wiggle,
-                      int &cnt_found,
-                      int minbq = 10) {
+                      float germ_min_vaf,
+                      int mindepth,
+                      int minbq,
+                      int &exact_match,
+                      int &fuzzy_match) {
   /*
    * indel <0 for DEL >0 for INS
    * inseq is the insert seq, empty for DEL or not checking ins
@@ -223,8 +228,9 @@ static int ScanIndel(PileHandler *input,
   }
   int slen = indel < 0 ? abs(indel) : 1;
   int depth = 0;
+  exact_match = 0;
   int search;
-  //for (int search = -wiggle; search < slen + wiggle; ++search) {
+  //search from the middle and clockwise
   for (int search1 = 0; search1 < slen + 2 * wiggle; ++search1) {
     if (search1 >= slen + wiggle) search = slen + wiggle - search1 - 1;
     else search = search1;
@@ -242,10 +248,11 @@ static int ScanIndel(PileHandler *input,
       bam_mplp_init_overlaps(mplp);
     }
 
-    cnt_found = 0;
-    int pos, n=0, d=0, exact_match=0;
-    int nindel=0;
+    fuzzy_match = 0;
+    int pos, n=0, d=0;
     //std::cerr << "search: " << search << "\t" << "tpos: " << tpos << std::endl;
+    std::map<char, int> nuc_cnt;
+    std::string refbase = ref.QueryRegion(chrom, tpos+search, tpos+search);
     while ((n = bam_mplp_auto(mplp, &tid, &pos, n_plp, pileups)) > 0) {
       if (tid < 0) break;
       if (tid >= input->fp_hdr->n_targets) {
@@ -262,27 +269,29 @@ static int ScanIndel(PileHandler *input,
         if (qq[pi->qpos] < minbq or pi->is_refskip)  continue;
         ++d;
 
-        if (pi->indel != 0) {
+        if (pi->indel != 0) { // is anchor base of a indel
           //std::cerr << pi->indel <<std::endl;
           if (pi->qpos < pi->b->core.l_qseq) {
-            if (pi->indel < 0) {
+            if (pi->indel < 0) { // DEL
               if (indel == pi->indel && search == 0) ++exact_match;
-              if (indel < 0) ++cnt_found;
-              else if(indel > 0) ++nindel;
-            } else {
+              else ++fuzzy_match;
+            } else { // INS
               std::string inseq(pi->indel, '.');
               for (int32_t i = 0; i < pi->indel; ++i) {
                 if (pi->qpos + i + 1 == pi->b->core.l_qseq) break;
                 inseq[i] = seq_nt16_str[bam_seqi(bam_get_seq(pi->b), pi->qpos + i + 1)];
               }
               if (indel == pi->indel && inseq == seq) ++exact_match;
-              if (indel > 0) ++cnt_found;
-              else if(indel < 0) ++nindel;
+              else ++fuzzy_match;
             }
           }
-        } else {
-          //if nearby has a DEL
-          if (pi->is_del) ++nindel;
+        }
+        if (!pi->is_del) { //if not DEL
+          char cc = seq_nt16_str[bam_seqi(bam_get_seq(pi->b), pi->qpos)];
+          ++nuc_cnt[cc];
+        }
+        else {
+          ++nuc_cnt['-'];
         }
       }
       //printf("%s\t%d\t%d\t%d\t%d\n", input->fp_hdr->target_name[tid], pos+1, n_plp[0], nuc_cnt, non_del_cnt);
@@ -292,13 +301,33 @@ static int ScanIndel(PileHandler *input,
       fprintf(stderr, "bam_plp_auto failed for \"%s\"\n", input->fname.c_str());
       return -1;
     }
-    if (d >= 10 and nindel > 0.2 * d) {
+    // Exact match
+    if (diff_bam && exact_match > 0) {
       bam_mplp_destroy(mplp);
-      cnt_found = nindel;
       return depth;
     }
-    if (cnt_found > 1 || exact_match > 0) {
-      //std::cerr << "found " << cnt_found << "\t" << tpos << "," << search << std::endl;
+    if ((fuzzy_match > 1 and d <= 150) or (fuzzy_match > 2 and d > 150)) {
+      //std::cerr << "found " << fuzzy_match << "\t" << tpos << "," << search << std::endl;
+      bam_mplp_destroy(mplp);
+      return depth;
+    }
+    //nearby SNV
+    int max=0, secmax=0;
+    char maxbase = 0, secmaxbase = 0;
+    for (auto const& it: nuc_cnt) {
+      if (it.second > max) {
+        secmax = max;
+        max = it.second;
+        secmaxbase = maxbase;
+        maxbase = it.first;
+      } else if (it.second > secmax) {
+        secmax = it.second;
+        secmaxbase = it.first;
+      }
+    }
+    if ((d >= mindepth && max > 0 && maxbase != refbase[0] && max > d * germ_min_vaf) ||
+      (d >= mindepth && secmax > 0 && secmaxbase != refbase[0] && secmax > d * germ_min_vaf)) {
+      fuzzy_match = 2;
       bam_mplp_destroy(mplp);
       return depth;
     }
@@ -316,16 +345,16 @@ int GenotypeVariant(PileHandler *germbam,
                            const std::string& seq,
                            bool  handle_overlap,
                            int wiggle,
-                           float germ_min_vaf = 0.25,
-                           int mindepth = 10,
-                           int minbq = 20) {
+                           float germ_min_vaf,
+                           int mindepth,
+                           int minbq) {
   /* INPUT
    * 0 SNP, >0 INS, <0 DEL
    * seq: Inserted seq or SNV base
    * RETURN
-   * -1: INDEL overlap germline
+   * -2: Error
    * 0 : germline
-   * >0 : n_ref_count
+   * >0 : depth
    * other: error
    */
   //std::cerr << "scan indels" <<std::endl;
@@ -335,17 +364,17 @@ int GenotypeVariant(PileHandler *germbam,
     depth = ScanAllele(germbam, chrom, tpos, seq[0],handle_overlap, alt_count, minbq);
     if (depth == -1)
       return -2;
-    if (depth >= mindepth && alt_count > germ_min_vaf * depth)
+    if (depth >= mindepth && (float) alt_count >= germ_min_vaf * depth)
       return 0;
   } else {
-    int alt_count = 0;
-    depth = ScanIndel(germbam, chrom, tpos, indel, seq, handle_overlap, wiggle, alt_count, minbq);
+    int exact_match = 0, fuzzy_match = 0;
+    depth = ScanIndel(germbam, false, ref, chrom, tpos, indel, seq, handle_overlap, wiggle,
+                      germ_min_vaf, mindepth, minbq, exact_match, fuzzy_match);
     if (depth == -1)
       return -2;
-    if (depth >= mindepth && alt_count > germ_min_vaf * depth)
+    if (depth >= mindepth && (fuzzy_match > 1 || (float) exact_match >= germ_min_vaf * depth))
       return 0;
-    if (germ_min_vaf >= 1.0) return depth;
-
+# if 0
     // search nearby germline SNP when calling INDELs
     bam_mplp_t mplp = NULL;
     const bam_pileup1_t *pileups[1] = { NULL };
@@ -440,6 +469,7 @@ int GenotypeVariant(PileHandler *germbam,
       }
       bam_mplp_destroy(mplp);
     }
+#endif
   }
   return depth;
 }

@@ -107,12 +107,12 @@ struct AccuOptions {
   string MID_tag = "";
   int min_indel_dist_from_readend = 3;
   int8_t IndelAnchorBaseQ = 53; // '?' phred 30 , '5' 20
-  int MIN_NEAREST_SNV = 4;
+  int MIN_NEAREST_SNV = 3;
   int MIN_NEAREST_INDEL = 10;
 
   //hidden parameter
   int indel_anchor_size= 1;
-  int germline_minbq = 20;
+  int germline_minbq = 10;
   bool all_mutant_frags = false;
   bool detail_qscore_prof = false;
   int pair_min_overlap = 0;
@@ -547,8 +547,11 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
       }
     }
 
+    std::vector<cpputil::Variant> r1_vars, r2_vars;
     for (auto &s : seg) {
       auto vars = cpputil::GetVar(s, bamheader, ref);
+      if (s.FirstFlag()) r1_vars = vars;
+      else r2_vars = vars;
       for (auto &var : vars) {
         if (var.contig_start >= rstart && var.EndPos() <= rend)
           var_vars[var].push_back(var);
@@ -729,11 +732,12 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
 
 
             if (opt.germline_bam.size() > 1) {
-              int cnt_found = 0;
-              germ_depth = cpputil::ScanIndel(&pileup, avars[ai].contig, avars[ai].contig_start,
+              int exact_match = 0, fuzzy_match = 0;
+              germ_depth = cpputil::ScanIndel(&pileup, true, ref, avars[ai].contig, avars[ai].contig_start,
                                                   (int) avars[ai].alt_seq.size() - (int) avars[ai].contig_seq.size(),
-                                                  avars[ai].alt_seq.substr(1), true, opt.germline_var_maxdist, germ_support);
-              if (germ_support > 0) {
+                                                  avars[ai].alt_seq.substr(1), true, opt.germline_var_maxdist,
+                                                  opt.germline_cutoff_vaf, 10, opt.germline_minbq, exact_match, fuzzy_match);
+              if (exact_match > 0 or fuzzy_match > 1) {
                 ++errorstat.seen_in_germ;
                 continue;
               }
@@ -750,7 +754,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
                                                   (int) avars[ai].alt_seq.size() - (int) avars[ai].contig_seq.size(),
                                                   avars[ai].alt_seq.substr(1),
                                                   true,1,
-                                                  opt.germline_cutoff_vaf);
+                                                  opt.germline_cutoff_vaf, 10, opt.germline_minbq);
             if (site_depth == 0) {
               ++errorstat.seen_in_germ;
               continue;
@@ -792,23 +796,29 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
             }
             // search near by variant
             bool has_nearby = false;
-            for (int vi = 0; vi < (int) refined_vars.size(); ++vi) {
-              if (vi == vindex) continue;
-              for (const auto& vvv : refined_vars[vi]) {
-                int cutoff = vvv.isIndel()? opt.MIN_NEAREST_INDEL : opt.MIN_NEAREST_SNV;
-                if (refined_vars[vi][0].first_of_pair) {
-                  if (abs(refined_vars[vi][0].r1_start - avars[ai].r1_start) < cutoff) {
-                    has_nearby = true;
-                    break;
-                  }
-                } else {
-                  if (abs(refined_vars[vi][0].r2_start - avars[ai].r2_start) < cutoff) {
-                    has_nearby = true;
-                    break;
-                  }
+            if (avars[ai].r1_start >0) {
+              for (const auto &vvv : r1_vars) {
+                if (vvv == avars[ai]) continue;
+                int cutoff = vvv.isIndel() ? opt.MIN_NEAREST_INDEL : opt.MIN_NEAREST_SNV;
+                if (abs(vvv.r1_start - avars[ai].r1_start) < cutoff) {
+                  has_nearby = true;
+                  break;
                 }
               }
-              if (has_nearby) break;
+            }
+            if (has_nearby) {
+              ++errorstat.nindel_filtered_adjvar;
+              continue;
+            }
+            if (avars[ai].r2_start >0) {
+              for (const auto &vvv : r2_vars) {
+                if (vvv == avars[ai]) continue;
+                int cutoff = vvv.isIndel() ? opt.MIN_NEAREST_INDEL : opt.MIN_NEAREST_SNV;
+                if (abs(vvv.r2_start - avars[ai].r2_start) < cutoff) {
+                  has_nearby = true;
+                  break;
+                }
+              }
             }
             if (has_nearby) {
               ++errorstat.nindel_filtered_adjvar;
@@ -847,7 +857,9 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
                                                   0,
                                                   avars[ai].alt_seq,
                                                   true,0,
-                                                  opt.germline_cutoff_vaf);
+                                                  opt.germline_cutoff_vaf,
+                                                  10,
+                                                  opt.germline_minbq);
             if (site_depth == 0) {
               ++errorstat.seen_in_germ;
               continue;
