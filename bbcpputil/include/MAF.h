@@ -71,7 +71,7 @@ class MAFReader {
     return true;
   }
 
-  bool var_exist(const std::string& contig, int32_t pos, const std::string& alt) const {
+  bool var_exist(const std::string& contig, const int32_t pos, std::string alt="") const {
     auto it = records_.find(contig);
     if (it != records_.end()) {
       auto it2 = it->second.find(pos + 1);

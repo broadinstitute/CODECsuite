@@ -202,7 +202,7 @@ class BCFReader {
   }
 
 
-  bool var_exist(const string &contig, const int64_t &pos, string allele = "") const {
+  bool var_exist(const string &contig, const int32_t &pos, string allele = "") const {
     /*
      * If allele is empty, assume a SNP mask and return true if just position match.
      */
