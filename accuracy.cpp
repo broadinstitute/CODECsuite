@@ -63,8 +63,8 @@ struct AccuOptions {
   vector<string> vcfs;
   string maf_file;
 
-  string accuracy_stat;
-  string error_prof_out;
+  string mutation_metrics;
+  string variants_out;
   string context_count;
   string known_var_out;
   string sample;
@@ -130,7 +130,7 @@ static struct option  accuracy_long_options[] = {
 //    {"raw_bam",                  required_argument,      0,        'l'},
     {"bed",                      required_argument,      0,        'L'},
     {"preset",                   required_argument,      0,        'p'},
-    {"accuracy_stat",            required_argument,      0,        'a'},
+    {"mutation_metrics",         required_argument,      0,        'a'},
     {"load_unpair",              no_argument,            0,        'u'},
     {"load_supplementary",       no_argument,            0,        'S'},
     {"load_secondary",           no_argument,            0,        '2'},
@@ -142,7 +142,7 @@ static struct option  accuracy_long_options[] = {
     {"maf",                      required_argument ,     0,        'M'},
     {"output",                   required_argument,      0,        'o'},
     {"reference",                required_argument,      0,        'r'},
-    {"error_prof_out",           required_argument,      0,        'e'},
+    {"variants_out",             required_argument,      0,        'e'},
     {"bqual_min",                required_argument,      0,        'q'},
     {"min_fraglen",              required_argument,      0,        'g'},
     {"max_fraglen",              required_argument,      0,        'G'},
@@ -206,10 +206,10 @@ void accuracy_print_help()
   std::cerr<< "-M/--maf,                              MAF file for somatic variants [null].\n";
   std::cerr<< "-o/--output,                           output prefix. -a, -e, -C overwrite this options [null].\n";
   std::cerr<< "-r/--reference,                        reference sequence in fasta format [null].\n";
-  std::cerr<< "-a/--accuracy_stat,                    output reporting accuracy for each alignment [accuracy_stat.txt].\n";
-  std::cerr<< "-e/--error_prof_out,                   Error profile output in plain txt format [error_prof_out.txt].\n";
-  std::cerr<< "-k/--known_var_out,                    Output for known var. [known_var_out.txt].\n";
-  std::cerr<< "-C/--context_count,                    Output for trinucleotide and dinucleotide context context in the reference. [context_count.txt].\n";
+  std::cerr<< "-a/--mutation_metrics,                 mutation metrics file [.mutation_metrics.txt].\n";
+  std::cerr<< "-e/--variants_out,                     mutations in plain txt format [.variants_called.txt].\n";
+  std::cerr<< "-k/--known_var_out,                    Output for known var. [default null].\n";
+  std::cerr<< "-C/--context_count,                    Output for trinucleotide and dinucleotide context context in the reference. [.context_count.txt].\n";
   //std::cerr<< "--qscore_prof,                         Output qscore prof. First column is qscore cutoff; second column is number of bases in denominator\n";
   std::cerr<< "--detail_qscore_prof,                  Output finer scale qscore cutoffs, error rates profile. The default is only q0, q30 [false]. \n";
   std::cerr<< "--read_level_stat,                     Output read level error metrics.\n";
@@ -273,7 +273,7 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
         opt.bed_file = optarg;
         break;
       case 'a':
-        opt.accuracy_stat = optarg;
+        opt.mutation_metrics = optarg;
         break;
       case 'm':
         opt.mapq = atoi(optarg);
@@ -381,7 +381,7 @@ int accuracy_parse_options(int argc, char* argv[], AccuOptions& opt) {
         opt.reference = optarg;
         break;
       case 'e':
-        opt.error_prof_out = optarg;
+        opt.variants_out = optarg;
         break;
       case 'k':
         opt.known_var_out = optarg;
@@ -1020,19 +1020,19 @@ int codec_accuracy(int argc, char ** argv) {
   }
   SeqLib::RefGenome ref;
   ref.LoadIndex(opt.reference);
-  if (opt.accuracy_stat.empty()) {
+  if (opt.mutation_metrics.empty()) {
     if (opt.sample.empty()) {
       std::cerr << "must specify output. -a or -o is not used\n";
       exit(0);
     }
-    opt.accuracy_stat = opt.sample + ".error_metrics.txt";
+    opt.mutation_metrics = opt.sample + ".mutation_metrics.txt";
   }
-  if (opt.error_prof_out.empty()) {
+  if (opt.variants_out.empty()) {
     if (opt.sample.empty()) {
       std::cerr << "must specify output. -e or -o is not used\n";
       exit(0);
     }
-    opt.error_prof_out = opt.sample + ".mutant_families.txt";
+    opt.variants_out = opt.sample + ".variants_called.txt";
   }
   if (opt.context_count.empty()) {
     if (opt.sample.empty()) {
@@ -1041,15 +1041,15 @@ int codec_accuracy(int argc, char ** argv) {
     }
     opt.context_count = opt.sample + ".context_count.txt";
   }
-  std::ofstream stat(opt.accuracy_stat);
-  std::ofstream ferr(opt.error_prof_out);
+  std::ofstream stat(opt.mutation_metrics);
+  std::ofstream ferr(opt.variants_out);
   std::ofstream context(opt.context_count);
   if (!stat.is_open()) {
-    std::cerr << opt.accuracy_stat << " cannot be opened\n";
+    std::cerr << opt.mutation_metrics << " cannot be opened\n";
     exit(1);
   }
   if (!ferr.is_open()) {
-    std::cerr << opt.error_prof_out << " cannot be opened\n";
+    std::cerr << opt.variants_out << " cannot be opened\n";
     exit(1);
   }
   if (!context.is_open()) {

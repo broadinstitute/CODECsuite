@@ -99,7 +99,7 @@ void codec_trim_usage()
   std::cerr<< "-B/--mismatch                          Penalty for a mismatch [4]\n";
   std::cerr<< "-G/--gap                               Penalty for open or extend a gap [5]\n";
   std::cerr<< "-d/--debug,                            1: detail pairwise alignment plot, 2: Qscore plot, default no debug[0]\n";
-  std::cerr<< "-S/--split_bam_output,                     Output byproduct to separate bams [false]";
+  std::cerr<< "-S/--split_bam_output,                     Output byproduct to separate bams [false]\n";
 }
 
 int trim_parse_options(int argc, char* argv[], Options& opt) {
@@ -195,7 +195,7 @@ int codec_trim(int argc, char** argv)
   FastxRecord read2;
 
   //Output
-  cpputil::UnMappedBamWriter highconf(opt.prefix + ".highconf.bam", opt.rgid, opt.rgsm);
+  cpputil::UnMappedBamWriter highconf(opt.prefix + ".trim.bam", opt.rgid, opt.rgsm);
 
   cpputil::UnMappedBamWriter lost;
   cpputil::UnMappedBamWriter singleton;

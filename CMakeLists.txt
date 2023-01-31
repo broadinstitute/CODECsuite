@@ -79,23 +79,3 @@ if (CMAKE_BUILD_TYPE MATCHES Debug)
     add_backward(codec)
 endif()
 target_link_libraries(codec ${CPP_LIBS} spoa)
-
-##Other exes
-add_executable(trimbam trimbam.cpp ${deps})
-if (CMAKE_BUILD_TYPE MATCHES Debug)
-    add_backward(trimbam)
-endif()
-target_link_libraries(trimbam ${CPP_LIBS})
-
-add_executable(annotate_bam_with_umis annotate_bam_with_umis.cpp)
-if (CMAKE_BUILD_TYPE MATCHES Debug)
-    add_backward(annotate_bam_with_umis)
-endif()
-target_link_libraries(annotate_bam_with_umis z ${CPP_LIBS})
-
-add_executable(mpileup testmpileup.cpp)
-target_link_libraries(mpileup z ${CPP_LIBS})
-#### Some deps
-###########
-### SGA
-#############
