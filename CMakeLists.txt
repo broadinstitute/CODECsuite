@@ -34,6 +34,7 @@ find_library(SEQLIB_LIBRARY
         )
 include(ExternalProject)
 if(NOT SEQLIB_LIBRARY)
+    message("SeqLib not found")
     ExternalProject_Add(SeqLib
             SOURCE_DIR "${SEQLIB_ROOT}"
             INSTALL_DIR "${SEQLIB_ROOT}"
@@ -74,6 +75,8 @@ elseif(CMAKE_BUILD_TYPE MATCHES Release)
 endif ()
 
 add_executable(codec codec.cpp ${subcommand} ${deps})
+add_dependencies(codec SeqLib)
+
 if (CMAKE_BUILD_TYPE MATCHES Debug)
     #add_executable(codec codec.cpp ${subcommand} ${deps} ${BACKWARD_ENABLE})
     add_backward(codec)

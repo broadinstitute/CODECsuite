@@ -1,4 +1,3 @@
-capture_v2 = reformat_on_mac("/xchip/bloodbiopsy/ruolin/link_duplex/cds_capture/dec4_pancancer_v2/wrk/metrics/byproduct")
 by_product <- function(inputdir) {
   dfall = data.frame()
   for (f in list.files(inputdir, "byproduct.txt")) {

@@ -15,7 +15,6 @@ for k, v in defaults.items():
 
 params = job_properties['resources']
 
-#qsub_cmd = "source /broad/software/scripts/useuse && reuse UGER && "
 qsub_cmd = (f'qsub -l h_vmem={params["mem"]}G '
             f'-pe smp {params["ncores"]} -binding linear:{params["ncores"]} '
             f'-l h_rt={params["runtime"]}:00:00 '

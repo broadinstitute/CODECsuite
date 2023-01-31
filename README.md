@@ -11,7 +11,7 @@ prerequisite for C++ based programs. For snakemake workflow check out [here](./s
 
 First, recursive clone the repo and create a build directory which will holds the installion files and final executables.
 
-`git clone --recursive git@github.com:broadinstitute/CODECsuite.git && cd CODECsuite && make build`
+`git clone --recursive git@github.com:broadinstitute/CODECsuite.git && cd CODECsuite && mkdir build`
 
 Next, build the program with cmake.
 

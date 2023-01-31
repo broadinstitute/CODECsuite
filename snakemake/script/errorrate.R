@@ -12,15 +12,11 @@ eof_error_table <- function(inputdir) {
   compute_ci(df)
 }
 
-dupseq = "/xchip/bloodbiopsy/ruolin/link_duplex/dupseq/dec4_pancancer_dupseq/wrk/miredas"
 dupseq_df = eof_error_table(dupseq)
 
-cds = "/xchip/bloodbiopsy/ruolin/link_duplex/cds_capture/dec4_pancancer_v2/wrk/miredas"
 withET_df = eof_error_table(cds)
 
 total_df = rbind(dupseq_df, withET_df)
-#scatter_df = pivot_wider(total_df %>% select(sample, lane, group, mean), id_cols = c("sample", "lane"), names_from = "group", values_from="mean")
-total_df
 
 ggplot(total_df %>% filter(sample == "HD_82_ctDNA"), aes(x = group, y = mean, color = lane)) +
   geom_point(size = 1, position = position_dodge2(width=0.5)) + 
@@ -28,19 +24,6 @@ ggplot(total_df %>% filter(sample == "HD_82_ctDNA"), aes(x = group, y = mean, co
   scale_y_log10(breaks = c(1e-7, 1e-6, 1e-5, 1e-4, 1e-3), labels = c("1/10M","1/1M", "1/100k", "1/10k", "1/1k")) +
   annotation_logticks(sides = "l", outside = T) +  coord_cartesian(clip = "off", ylim = c(1e-7, 1e-3)) +
   labs(x = "", y = "Error Rate", color = "", shape = "")
-
-write_csv(total_df %>% filter(group=="within_eof12bp"), "~/Documents/tmp.csv")
-ggsave("~/Documents/HD82_pan_errorrate.pdf", width = 6, height = 4.5, dpi='retina')
-
-########## Indel Realignment by Happy
-# hapfp = fread(reformat_on_mac("/xchip/bloodbiopsy/ruolin/link_duplex/cds_wgs/pcr_condition_v2_hiseq_250x_NA12878/vcwrk/output/lane1.index1.fp.happy.txt"))
-# hapfp = hapfp %>% mutate(mutid = paste(V1, V2, V4, V5, sep='_'))
-# 
-# myfp = fread(reformat_on_mac("/xchip/bloodbiopsy/ruolin/link_duplex/cds_wgs/pcr_condition_v2_hiseq_250x_NA12878/wrk/accu_out/consensus/lane1.index1.mutant_families.txt"))
-# myfp = myfp %>% filter(type == "SNV")
-# myfp = myfp %>% mutate(mutid = paste(chrom, ref_pos, ref, alt, sep='_'))
-# nrow(myfp[myfp$mutid %in% hapfp$mutid,])
-# 
 
 library(ggplot2)
 
@@ -58,11 +41,6 @@ theme_set(plot_theme)
 
 # ##### CDS PanCancerdata Error rate
 header = c("sample_id", "total_base_errors", "total_bases_eval", "sample", "lane", "group")
-dupseqdf = prepare_error("/xchip/bloodbiopsy/ruolin/link_duplex/dupseq/dec4_pancancer_dupseq/wrk/miredas", "duplex") %>% select(header)
-cdsdf = prepare_error("/xchip/bloodbiopsy/ruolin/link_duplex/cds_capture/dec4_pancancer_v2/wrk/miredas", "duplex") %>% select(header)
-rawdf = to_miredas_errordf(prepare_error("/xchip/bloodbiopsy/ruolin/link_duplex/dupseq/dec4_pancancer_dupseq/wrk/accu/raw", "raw"))
-r1r2df = to_miredas_errordf(prepare_error("/xchip/bloodbiopsy/ruolin/link_duplex/dupseq/dec4_pancancer_dupseq/wrk/accu/r1r2", "r1r2"))
-ssc = prepare_error("/xchip/bloodbiopsy/ruolin/link_duplex/dupseq/dec4_pancancer_dupseq/wrk/miredas/ssc", "ssc")
 
 total_df = rbind(dupseqdf, cdsdf, rawdf, r1r2df, ssc) 
 total_df = total_df %>% mutate(group = paste(lane, group, sep="_"))
@@ -83,8 +61,6 @@ write_csv(total_df %>% arrange(lane), "~/Documents/tmp.csv")
 ######### Downsample plot
 #####################
 
-cdshd82_ds = prepare_error("/xchip/bloodbiopsy/ruolin/link_duplex/cds_capture/dec4_pancancer_v2/dswrk/miredas/HD_82_ctDNA", "HD_82")
-cdspat_ds = prepare_error("/xchip/bloodbiopsy/ruolin/link_duplex/cds_capture/dec4_pancancer_v2/dswrk/miredas/05246_315_ctDNA", "05245_315")
 total_ds = rbind(cdshd82_ds, cdspat_ds)
 total_ds = compute_ci(total_ds)  
 total_ds$family_size = substr(total_ds$sample_id, nchar(total_ds$sample_id), nchar(total_ds$sample_id))
@@ -99,18 +75,12 @@ ggplot(total_ds, aes(x = family_size, y = mean, color = sample)) +
   annotation_logticks(sides = "l", outside = T) +  coord_cartesian(clip = "off", ylim = c(1e-7, 1e-3)) + 
   labs(x = "Family Size", y = "Error Rate", color = "", shape = "") 
   #theme(legend.position = "none")
-ggsave("~/Documents/Errorrate_by_family_size.pdf", width = 6, height = 4.5, dpi='retina')
 total_ds %>% write_csv(., "~/Documents/tmp.csv")
 
 ##########
 ############ monomer
 #######################
 
-r1r2_mono = monomer_fromc('/xchip/bloodbiopsy/ruolin/link_duplex/dupseq/dec4_pancancer_dupseq/wrk/accu/r1r2', "DupSeq_r1r2_q30", 30)
-raw_mono = monomer_fromc('/xchip/bloodbiopsy/ruolin/link_duplex/dupseq/dec4_pancancer_dupseq/wrk/accu/raw', "DupSeq_raw_q30", 30)
-dupseq_mono = prepare_error("/xchip/bloodbiopsy/ruolin/link_duplex/dupseq/dec4_pancancer_dupseq/wrk/miredas", "DupSeq_Duplex", "monomer.txt$")
-ssc_mono = prepare_error("/xchip/bloodbiopsy/ruolin/link_duplex/dupseq/dec4_pancancer_dupseq/wrk/miredas/ssc", "DupSeq_SSC", "monomer.txt$")
-cds_mono = prepare_error("/xchip/bloodbiopsy/ruolin/link_duplex/cds_capture/dec4_pancancer_v2/wrk/miredas", "CDS", "monomer.txt$")
 r1r2_and_raw = rbind(r1r2_mono, raw_mono)
 colnames(r1r2_and_raw)[1:5] = c("ref_allele", "alt_allele", "total_base_errors", "total_bases_eval", "sample_id")
 r1r2_and_raw = r1r2_and_raw %>% mutate(sample_id = paste(lane, sample, sep="_"))
@@ -128,34 +98,25 @@ ggplot(total_mono, aes(x = mut_type, y = mean, color = group)) +
   labs(x = "Mononucleotide Mutation Type", y = "Error Rate", color = "", shape = "") +
   facet_wrap(~sample)
   #theme(legend.position = "none")
-ggsave("~/Documents/PanCancerErrorRateByContext.pdf", width = 12, height = 4.5, dpi='retina')
 write_csv(total_mono, "~/Documents/tmp.csv")
 
 
 ########FFPE WES errorrate
 ########FFPE WES errorrate
 #CDS
-wes = to_miredas_errordf(prepare_error("/xchip/bloodbiopsy/ruolin/link_duplex/cds_capture/ffpe_wes_cds/pip/wrk/accu_out/cds_consensus", "CDS"))
 total_df = compute_ci(wes)
 write_csv(total_df, "~/Documents/WES_cds.csv")
 
 
-ffpemono = monomer_fromc('/xchip/bloodbiopsy/ruolin/link_duplex/cds_capture/ffpe_wes_cds/pip/wrk/accu_out/cds_consensus', "CDS", 30)
 colnames(ffpemono)[1:5] = c("ref_allele", "alt_allele", "total_base_errors", "total_bases_eval", "sample_id")
 ffpemono = ffpemono %>% mutate(mut_type = paste(ref_allele, alt_allele, sep=">"))
 ffpemono = compute_ci(ffpemono)
 
   
-?ggsave()
-ffpe = prepare_error("/xchip/bloodbiopsy/ruolin/link_duplex/cds_capture/ffpe_wes_cds/pip/wrk/accu_out/cds_consensus", "CDS")
 ffpe %>% select(n_bases_eval, n_errors, erate, lane)
 
-#Regular
-wesreg = to_miredas_errordf(prepare_error("/xchip/bloodbiopsy/ruolin/link_duplex/cds_capture/ffpe_wes_cds/regularpip/wrk", "Reg"))
 wesreg_df = compute_ci(wesreg)
-write_csv(wesreg_df, "~/Documents/WES_cds.csv")
 
-reg_ffpemono = monomer_fromc('/xchip/bloodbiopsy/ruolin/link_duplex/cds_capture/ffpe_wes_cds/regularpip/wrk', "Reg", 30)
 colnames(reg_ffpemono)[1:5] = c("ref_allele", "alt_allele", "total_base_errors", "total_bases_eval", "sample_id")
 reg_ffpemono = reg_ffpemono %>% mutate(mut_type = paste(ref_allele, alt_allele, sep=">"))
 reg_ffpemono = compute_ci(reg_ffpemono)

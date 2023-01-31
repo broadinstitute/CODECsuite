@@ -1,12 +1,19 @@
 ---
-input_meta: input.tsv 
-cwd: ../wrkdir
-ncores: 4 
-nparallel: 40 
-tmpdir: tmp 
-sample_sheet: pancancer_v2/pip/sample_sheet.csv
-ref: $HG19 
-codec_root: ../../../codecsuite/ 
-gatk3: /humgen/gsa-hpprojects/GATK/bin/GenomeAnalysisTK-3.7-0-gcfedb67/GenomeAnalysisTK.jar
-gatk4: gatk4
-mutect: /broad/software/free/Linux/redhat_7_x86_64/pkgs/mutect_1.1.7/mutect-1.1.7.jar
+input_meta: input.tsv
+cwd: codec
+ncores: 4
+nparallel: 40
+tmpdir: tmp
+ref: $HG19
+codec_root:
+dict: dummy
+gatk3:
+gatk4: gatk
+mutect:
+fgbio:
+bwa: bwa
+region_bed:
+region_interval_list:
+sampleid: 
+dbsnp:
+duplex_recovery_script: 
