@@ -187,37 +187,32 @@ void accuracy_print_help()
 {
   std::cerr<< "---------------------------------------------------\n";
   std::cerr<< "Usage: codec accuracy [options]\n";
-  std::cerr<< "General Options:\n";
+  std::cerr<< "Suggested Options:\n";
   std::cerr<< "-p/--preset,                           options preset. choice of [stringent, lenient, null]\n";
-  std::cerr<< "-v/--verbose,                          [default 0]\n";
   std::cerr<< "-b/--bam,                              input bam\n";
   std::cerr<< "-n/--normal_bam,                       input normal bam [optional]\n";
 //  std::cerr<< "-l/--raw_bam,                          input raw bam [optional]\n";
   std::cerr<< "-L/--bed,                              targeted region\n";
+  std::cerr<< "-o/--output,                           output prefix. -a, -e, -C overwrite this options [null].\n";
+  std::cerr<< "-r/--reference,                        reference sequence in fasta format [null].\n";
+  std::cerr<< "-V/--vcfs,                             comma separated VCF file(s) of blacklist variants such as germline variants or populations variants (e.g. dbSNP)[null].\n";
 
+  std::cerr<< "\nFor standard NGS, use -u -R 1 -s:\n";
+  std::cerr<< "-u/--load_unpair,                      include unpaired alignment [false].\n";
+  std::cerr<< "-R/--count_read,                       0: collapse R1,R2; only overlapped region. 1: collapse R1,R2; include overhangs. 2: count independently for R1 and R2, including overhang [0].\n";
+  std::cerr<< "-s/--standard_ngs_filter,              Filter for standard NGS (where you expect very little overlap between R1 and R2) [false].\n";
+
+  std::cerr<< "\nOther Options:\n";
+  std::cerr<< "-v/--verbose,                          [default 0]\n";
+  std::cerr<< "-U/--MID_tag,                          molecular identifier tag name [MI] (MI is used in fgbio). This is only used when -D is on. During this mode, reads will\n";
+  std::cerr<< "-M/--maf,                              MAF file for somatic variants [null].\n";
+  std::cerr<< "-k/--known_var_out,                    Output variants which match the blacklist vcfs (from -V). [default null].\n";
+
+  std::cerr<< "\nFiltering Options:\n";
   std::cerr<< "-S/--load_supplementary,               include supplementary alignment [false].\n";
   std::cerr<< "-P/--load_only_proper_pair,            improper pair is included by default [false].\n";
   std::cerr<< "-2/--load_secondary,                   include secondary alignment [false].\n";
-  std::cerr<< "-u/--load_unpair,                      include unpaired alignment [false].\n";
   std::cerr<< "-D/--load_duplicate,                   include alignment marked as duplicates [false].\n";
-  std::cerr<< "-U/--MID_tag,                          molecular identifier tag name [MI] (MI is used in fgbio). This is only used when -D is on. During this mode, reads will\n"
-                                                      "read in as families which are identified by either MID or start+stop+UMI(if RX tag exist)";
-  std::cerr<< "-V/--vcfs,                             comma separated VCF file(s) for germline variants or whitelist variants[null].\n";
-  std::cerr<< "-M/--maf,                              MAF file for somatic variants [null].\n";
-  std::cerr<< "-o/--output,                           output prefix. -a, -e, -C overwrite this options [null].\n";
-  std::cerr<< "-r/--reference,                        reference sequence in fasta format [null].\n";
-  std::cerr<< "-a/--mutation_metrics,                 mutation metrics file [.mutation_metrics.txt].\n";
-  std::cerr<< "-e/--variants_out,                     mutations in plain txt format [.variants_called.txt].\n";
-  std::cerr<< "-k/--known_var_out,                    Output for known var. [default null].\n";
-  std::cerr<< "-C/--context_count,                    Output for trinucleotide and dinucleotide context context in the reference. [.context_count.txt].\n";
-  //std::cerr<< "--qscore_prof,                         Output qscore prof. First column is qscore cutoff; second column is number of bases in denominator\n";
-  std::cerr<< "--detail_qscore_prof,                  Output finer scale qscore cutoffs, error rates profile. The default is only q0, q30 [false]. \n";
-  std::cerr<< "--read_level_stat,                     Output read level error metrics.\n";
-  std::cerr<< "--cycle_level_stat,                    Output cycle level error metrics.\n";
-
-  std::cerr<< "\nFiltering Options:\n";
-
-  std::cerr<< "-s/--standard_ngs_filter,              Filter for standard NGS (where you expect very little overlap between R1 and R2) [false].\n";
   std::cerr<< "-q/--bqual_min,                        Skip bases if min(q1, q2) < this when calculating error rate. q1, q2 are baseQ from R1 and R2 respectively [20].\n";
   std::cerr<< "-m/--mapq,                             min mapping quality [20].\n";
   std::cerr<< "-Q/--min_passQ_frac,                   Filter out a read if the fraction of bases passing quality threshold (together with -q) is less than this number [0].\n";
@@ -242,11 +237,18 @@ void accuracy_print_help()
   std::cerr<< "-Y/--min_germdepth,                    Minimum depth in germline bam [5].\n";
   std::cerr<< "-G/--max_fraglen,                      Filter out a read if its fragment length is larger than this value [INT_MAX].\n";
   //std::cerr<< "-p/--pair_min_overlap,                 When using selector, the minimum overlap between the two ends of the pair. -1 for complete overlap, 0 no overlap required [0].\n";
-  std::cerr<< "-R/--count_read,                       0: collapse R1,R2, only overlapped region. 1: collpase R1,R2; include overhangs. 2: count independently for R1 and R2, including overhang [0].\n";
   std::cerr<< "-c/--clustered_mut_cutoff,             Filter out a read if at least this number of mutations occur in a window of 30 bp near the read end (<15 bp). [INT_MAX].\n";
   std::cerr<< "--min_dist_to_nearest_SNV,             The indel of interest is at least x nt from another SNV. [x = 4].\n";
   std::cerr<< "--min_dist_to_nearest_INDEL,           The indel of interest is at least x nt from another INDEL. [x = 10].\n";
-  //std::cerr<< "--accu_burden,                         AS filter is applied to all fragments. [mutant fragment only].\n";
+
+  std::cerr<< "\n Obsolete Options:\n";
+  std::cerr<< "-a/--mutation_metrics,                 mutation metrics file [.mutation_metrics.txt].\n";
+  std::cerr<< "-e/--variants_out,                     mutations in plain txt format [.variants_called.txt].\n";
+  std::cerr<< "-C/--context_count,                    Output for trinucleotide and dinucleotide context context in the reference. [.context_count.txt].\n";
+  //std::cerr<< "--qscore_prof,                         Output qscore prof. First column is qscore cutoff; second column is number of bases in denominator\n";
+  std::cerr<< "--detail_qscore_prof,                  Output finer scale qscore cutoffs, error rates profile. The default is only q0, q30 [false]. \n";
+  std::cerr<< "--read_level_stat,                     Output read level error metrics.\n";
+  std::cerr<< "--cycle_level_stat,                    Output cycle level error metrics.\n";
   //std::cerr<< "-A/--all_mutant_frags,                 Output all mutant fragments even if not pass failters. Currently only works for known vars [false].\n";
 }
 
