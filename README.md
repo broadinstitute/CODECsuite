@@ -103,3 +103,7 @@ output.mutation_metrics.txt: includes SNV_rate, INDEL_rate and etc.
 output.variatns_called.txt: mutations from single fragments
 output.context_count.txt: trinucleotide context and dinucleotide context counts
 ```
+
+For CODEC-MSI please refer to [msi](./msi). And by default CMAKE will not build CODEC-MSI. Please uncomment the last two
+lines if you indeed want to build CODEC-MSI
+

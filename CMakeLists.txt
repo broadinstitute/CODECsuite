@@ -82,3 +82,7 @@ if (CMAKE_BUILD_TYPE MATCHES Debug)
     add_backward(codec)
 endif()
 target_link_libraries(codec ${CPP_LIBS} spoa)
+
+######## uncomment if you need to build CODEC_MSI 
+#add_executable(msi msi/msi.cpp ${deps})
+#target_link_libraries(msi z ${CPP_LIBS})
