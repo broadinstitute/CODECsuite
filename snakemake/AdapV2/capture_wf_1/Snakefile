@@ -1,22 +1,17 @@
 include: "../Snakefile"
 GROUP_BY_UMI_DIR="groupbyumi"
-#MIREDAS_DIR="error"
-FILTER=f"{CODEC_root}/cmake-build-release/codec filter"
 DETECT_DIR="detect"
 CONSENSUS_OUT="consensus_out"
 RECOVERY = config['duplex_recovery_script']
 COLLECT_DUPMET = f"python {RECOVERY}"
-UMITOOLS = 'umi_tools'
 
 rule all:
     input:
-         #expand(DETECT_DIR + "/{index}.detect_fingerprint.txt", index=sample_names),
          expand(Metrics_OUT + "/byproduct/{batch_id}.{index}.byproduct.txt", zip, batch_id = metadata.reset_index()['batch'], index = metadata.reset_index()['sample']),
          expand(Metrics_OUT + "/{index}.raw.umiHistogram.txt",index = metadata.reset_index()['sample']),
-         #expand("miredas/{index}.mol_consensus_error_metrics.txt", index=sample_names),
-         #expand(Metrics_OUT + "/{index}.duplex_yield_metrics.txt",index=sample_names),
-         #expand("accu/{index}.error_metrics.txt", index=sample_names),
-          #expand(Metrics_OUT + "/{index}.raw.hs_metrics.txt", index=sample_names),
+         expand(Metrics_OUT + "/{index}.duplex_yield_metrics.txt",index=sample_names),
+         expand("sfc/{index}.error_metrics.txt", index=sample_names),
+         expand(Metrics_OUT + "/{index}.raw.hs_metrics.txt", index=sample_names),
 
 
 sample_to_maf = metadata.reset_index().groupby('sample').agg({'fingerprint_maf': set})
@@ -40,54 +35,10 @@ rule CollectRawHsMetrics:
          {PICARD} CollectHsMetrics COVERAGE_CAP=20000 I={input.bam} O={output.metrics} R={params.ref} BAIT_INTERVALS={params.bait} TARGET_INTERVALS={params.bait} PER_TARGET_COVERAGE={output.per_target_cov}
          """
 
-#rule GroupRawReadByUMI:
-#    input:
-#        "tmp/{index}.raw.replacerg.markdup.bam",
-#    output:
-#         bam = "groupbyumi/{index}.raw.GroupedByUmi.bam",
-#         histogram = Metrics_OUT + "/{index}.raw.umiHistogram.txt"
-#    resources:
-#             mem = 8,
-#             runtime = 32,
-#             ncores = 2
-#    shell:
-#         """
-#         {FGBIO} --async-io \
-#              GroupReadsByUmi \
-#             -i {input} \
-#             -o {output.bam} \
-#             -f {output.histogram} \
-#             -e 2 \
-#             -x \
-#             -m 0 \
-#             --strategy=paired \
-#         """
-
-rule RefineUmiGroup:
-    input:
-         bam = "consensus/{index}.mol_consensus.aligned.bam"
-    output:
-         bam = temp("filtered/{index}.mol_consensus.aligned.umi_tools.bam")
-    resources:
-         mem = 8,
-         runtime = 24
-    shell:
-        """
-            {UMITOOLS} group \
-                  --stdin={input.bam} \
-                  --stdout={output.bam} \
-                  --method=codec \
-                  --umi-tag=RX \
-                  --umi-tag-delimiter=- \
-                  --extract-umi-method=tag \
-                  --edit-distance-threshold=2 \
-                  --output-bam \
-                  --paired \
-        """
 ##CODEC specific filters
 rule FilterMolecularConsensusReads:
     input:
-        bam = "filtered/{index}.mol_consensus.aligned.umi_tools.bam"
+        bam = "filtered/{index}.mol_consensus.aligned.bam"
     output:
         bam = "filtered/{index}.mol_consensus.filtered.bam",
         bai = "filtered/{index}.mol_consensus.filtered.bam.bai"
@@ -99,13 +50,13 @@ rule FilterMolecularConsensusReads:
         {FILTER} -b {input.bam} -f 2 | samtools sort - -o {output.bam} && samtools index {output.bam}  
         """
 
-rule CDSErrorMetrics:
+rule CODEC_SFC:
     input:
         bam = "filtered/{index}.mol_consensus.filtered.bam"
     output:
-        accu =  "accu/{index}.error_metrics.txt",
-        error =  "accu/{index}.mutant_families.txt",
-        context = "accu/{index}.context_count.txt",
+        accu =  "sfc/{index}.mutant_metrics.txt",
+        call =  "sfc/{index}.variants_called.txt",
+        context = "sfc/{index}.context_count.txt",
     params:
         ref = REF,
         high_conf_region = lambda wildcards : sample_to_bed.loc[wildcards.index]['bait_bed'],
@@ -117,7 +68,7 @@ rule CDSErrorMetrics:
         runtime = 96
     shell:
         """
-           {ACCU_BIN}  -b {input.bam} \
+           {CALL_BIN}  -b {input.bam} \
                -L {params.high_conf_region} \
                -r {params.ref} \
                -n {params.germ_bam} \
@@ -135,83 +86,10 @@ rule CDSErrorMetrics:
                -B 0.5 \
                -Y 0 \
                -a {output.accu} \
-               -e {output.error} \
+               -e {output.call} \
                -C {output.context}
         """
 
-
-rule MiredasDetectFingerprint:
-    input:
-         bam = "filtered/{index}.mol_consensus.filtered.bam"
-    output:
-         detect = DETECT_DIR + "/{index}.detect_fingerprint.txt",
-         families = DETECT_DIR + "/{index}.detect_families.txt"
-    params:
-         ref = REF,
-         mut_maf = lambda wildcards: sample_to_maf.loc[wildcards.index]['fingerprint_maf'],
-    resources:
-         mem = 4,
-         runtime = 2
-    shell:
-        """
-        miredas DetectFingerprint \
-            -r {params.ref} \
-            -b {input.bam} \
-            -m {params.mut_maf} \
-            -o {output.detect} \
-            --min_base_quality 30 \
-            -df edit_distance \
-            --mutant_families_outfile {output.families} \
-        """
-
-rule MiredasErrorMetrics2:
-    input:
-           bam = "filtered/{index}.mol_consensus.filtered.bam"
-    output:
-          "miredas/{index}.mol_consensus_error_metrics.txt",
-          "miredas/{index}.mol_consensus_mutant_families.txt",
-          "miredas/{index}.mol_consensus_trinucleotide_context.txt"
-    params:
-          normal_bam = lambda wildcards: sample_to_germbam.loc[wildcards.index]['germline_bam'],
-          sample_id = "{index}",
-          germ_vcf = lambda wildcards: sample_to_vcf.loc[wildcards.index]['germline_vcf'],
-          interval_list = lambda wildcards: sample_to_bait.loc[wildcards.index]['bait_intervals'],
-          mut_maf = lambda wildcards: sample_to_maf.loc[wildcards.index]['fingerprint_maf'],
-          output = "miredas/{index}.mol_consensus",
-          ref = REF,
-          max_af = 1.0,
-    resources:
-             mem = 14,
-             runtime = 72,
-    shell:
-        """
-        miredas CollectErrorMetrics2 \
-            -b {input.bam} \
-            -n {params.normal_bam} \
-            -s {params.sample_id} \
-            -m {params.mut_maf} \
-            -i {params.interval_list} \
-            -r {params.ref} \
-            --output_mutant_families \
-            --het_vcf {params.germ_vcf} \
-            --max_af {params.max_af} \
-            --min_base_quality 30 \
-           -o {params.output} \
-        """
-
-rule GetContextErrorRate:
-    input:
-        mutfam = "miredas/{index}.mutant_families.txt",
-        tnd = "miredas/{index}.trinucleotide_context.txt"
-    output:
-        "miredas/{index}.error_monomer.txt",
-    wildcard_constraints:
-        batch_id="[0-9a-zA-Z_]+",
-        index="[0-9a-zA-Z_]+ctDNA"
-    shell:
-         """
-           {MONOMER_ERROR_SCRIPT} --tnd  {input.tnd} --mutfam {input.mutfam} > {output}
-         """
 
 rule CollectRawInsertSizeMetrics:
     input:
@@ -261,6 +139,3 @@ rule DuplexRecoveryByTarget:
              -r \
              -o {output}
          """
-
-#rule CollectAllMetrics:
-#    input:

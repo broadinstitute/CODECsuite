@@ -6,7 +6,7 @@ DBSNP= config['dbsnp']
 
 rule all:
     input:
-        expand("{method}/{index}.error_metrics.txt", index = sample_names, method=['raw_accu', ACCU_OUT]),
+        expand("{method}/{index}.mutant_metrics.txt", index = sample_names, method=['raw_accu', ACCU_OUT]),
         expand(Metrics_OUT + "/{index}.raw.insert_size_metrics.txt",index = sample_names),
         expand(Metrics_OUT + "/byproduct/{batch_id}.{index}.byproduct.txt", zip, batch_id = metadata.reset_index()['batch'], index = metadata.reset_index()['sample']),
         expand(Metrics_OUT + "/{index}.{type}.wgs_metrics.txt",index = sample_names, type=['raw'])
@@ -55,23 +55,21 @@ rule CollectFinalWgsMetrics:
 rule CDSErrorMetrics:
     input:
          bam = "consensus/{index}.mol_consensus.aligned.bam",
-         #bam = "tmp/{index}.raw.replacerg.markdup.bam"
     output:
-          accu = ACCU_OUT + "/{index}.error_metrics.txt",
-          error = ACCU_OUT + "/{index}.mutant_families.txt",
+          accu = ACCU_OUT + "/{index}.mutant_metrics.txt",
+          called = ACCU_OUT + "/{index}.variants_called.txt",
           context = ACCU_OUT + "/{index}.context_count.txt",
     params:
           ref = REF,
           high_conf_region = EVAL_REGION_BED,
           dbsnp = DBSNP,
-          #germ_vcf = lambda wildcards : sample_to_vcf.loc[wildcards.index]['germline_vcf'],
           germ_bam = lambda wildcards : sample_to_germbam.loc[wildcards.index]['germline_bam'],
     resources:
              mem = 16,
              runtime = 96
     shell:
          """
-            {ACCU_BIN}  -b {input.bam} \
+            {CALL_BIN}  -b {input.bam} \
                 -L {params.high_conf_region} \
                 -r {params.ref} \
                 -n {params.germ_bam} \
@@ -90,29 +88,28 @@ rule CDSErrorMetrics:
                 -Y 5 \
                 -W 1 \
                 -a {output.accu} \
-                -e {output.error} \
-                -C {output.context} \
+                -e {output.called} \
+                -C {output.context}
          """
 
 rule RawCDSErrorMetrics:
     input:
          bam = "tmp/{index}.raw.replacerg.markdup.bam"
     output:
-          accu = "raw_accu/{index}.error_metrics.txt",
-          error = "raw_accu/{index}.mutant_families.txt",
+          accu = "raw_accu/{index}.mutant_metrics.txt",
+          called = "raw_accu/{index}.variants_called.txt",
           context = "raw_accu/{index}.context_count.txt",
     params:
           ref = REF,
           high_conf_region = EVAL_REGION_BED,
           dbsnp = DBSNP,
-          #germ_vcf = lambda wildcards : sample_to_vcf.loc[wildcards.index]['germline_vcf'],
           germ_bam = lambda wildcards : sample_to_germbam.loc[wildcards.index]['germline_bam'],
     resources:
              mem = 16,
              runtime = 96
     shell:
          """
-            {ACCU_BIN}  -b {input.bam} \
+            {CALL_BIN}  -b {input.bam} \
                 -L {params.high_conf_region} \
                 -r {params.ref} \
                 -n {params.germ_bam} \
@@ -132,199 +129,6 @@ rule RawCDSErrorMetrics:
                 -W 1 \
                 --min_passQ_frac_TT 0.6 \
                 -a {output.accu} \
-                -e {output.error} \
-                -C {output.context} \
+                -e {output.called} \
+                -C {output.context}
          """
-# rule Codec2Maf:
-#     input:
-#         ACCU_OUT + "/{index}.mutant_families.txt",
-#     output:
-#         temp("tmp/{index}.tmp.maf")
-#     shell:
-#         """
-#         {CODEC2MAF} {input} {output}\
-#         """
-
-# rule Maf2Vcf:
-#     input:
-#         "tmp/{index}.tmp.maf"
-#     output:
-#         temp("tmp/{index}.tmp.vcf")
-#     params:
-#           ref = REF,
-#     shell:
-#         """
-#         perl /xchip/bloodbiopsy/ruolin/apps/vcf2maf-1.6.21/maf2vcf.pl --input-maf {input} --output-dir tmp --ref-fasta {params.ref}
-#         """
-
-# rule AlignmentFilter:
-#     input:
-#          vcf = "tmp/{index}.tmp.vcf",
-#          bam = "consensus/{index}.mol_consensus.aligned.bam",
-#     params:
-#         bwa_index_bundle = "/xchip/bloodbiopsy/ruolin/database/gatk/hg19/Homo_sapiens_assembly19.fasta.img",
-#         ref = REF,
-#     output:
-#         vcf = temp(ACCU_OUT + "/{index}.mutant_families.alignment_filtered.vcf"),
-#         idx = temp(ACCU_OUT + "/{index}.mutant_families.alignment_filtered.vcf.idx"),
-#     shell:
-#         """
-#         {GATK} FilterAlignmentArtifacts -R {params.ref} -V {input.vcf} -I {input.bam} --bwa-mem-index-image {params.bwa_index_bundle} -O {output.vcf}
-#         """
-
-# rule Vcf2Maf:
-#     input:
-#           ACCU_OUT + "/{index}.mutant_families.alignment_filtered.vcf"
-#     output:
-#           ACCU_OUT + "/{index}.snv.alignment_filtered.maf",
-#           temp(ACCU_OUT + "/{index}.mutant_families.alignment_filtered.vep.vcf")
-#     params:
-#         vep = "/xchip/bloodbiopsy/ruolin/apps/ensembl-vep",
-#         ref = REF,
-#     shell:
-#         """
-#         perl /xchip/bloodbiopsy/ruolin/apps/vcf2maf-1.6.21/vcf2maf.pl --input-vcf {input} --output-maf {output} \
-#             --vep-path {params.vep} --vep-data {params.vep} --ref-fasta {params.ref} --vcf-normal-id NORMAL \
-#             --vcf-tumor-id TUMOR
-#         """
-# rule UpdateErrorMetrics:
-#     input:
-#          error = ACCU_OUT + "/{index}.mutant_families.txt",
-#          accu = ACCU_OUT + "/{index}.error_metrics.txt",
-#          maf = ACCU_OUT + "/{index}.snv.alignment_filtered.maf",
-#     output:
-#         ACCU_OUT + "/{index}.done"
-#     shell:
-#         """
-#         {UPDATE_MET} {input.accu} {input.error} {input.maf} && echo done > {output}
-#         """
-
-# rule RawErrorMetrics:
-#     input:
-#          bam = "tmp/{sample_id}.{index}.raw.aligned.bam",
-#     output:
-#           accu = ACCU_OUT + "/raw/{sample_id}.{index}.error_metrics.txt",
-#           error = ACCU_OUT + "/raw/{sample_id}.{index}.mutant_families.txt",
-#           known = ACCU_OUT + "/raw/{sample_id}.{index}.known_var.txt",
-#           readlevel = ACCU_OUT + "/raw/{sample_id}.{index}.readlevel.txt",
-#     params:
-#           ref = REF,
-#           mapq = 60,
-#           baseq = 0,
-#           high_conf_region = EAVL_REGION_BED,
-#           germ_vcf = TRUTH_BCF,
-#           vcf_sid = "HG001"
-#     resources:
-#              mem = 8,
-#              runtime = 96
-#     shell:
-#          """
-#             {ACCU_BIN}  -b {input.bam} \
-#                 -L {params.high_conf_region} \
-#                 -m {params.mapq} \
-#                 -r {params.ref} \
-#                 -V {params.germ_vcf} \
-#                 -s {params.vcf_sid} \
-#                 -p 50 \
-#                 -O \
-#                 -q {params.baseq} \
-#                 -a {output.accu} \
-#                 -e {output.error} \
-#                 -k {output.known} \
-#                 --read_level_stat {output.readlevel}
-#          """
-
-
-#group_to_samples = metadata.reset_index().groupby('group_id').sample.agg(list)
-#print(group_to_samples)
-# rule MergeGroupConsensus:
-#     input:
-#          lambda wildcard: expand("consensus/{id}.{{index}}.consensus.aligned.bam", id = batch_ids)
-#     output:
-#           bam = temp("consensus/{index}.aligned.bam")
-#     resources:
-#              mem = 8,
-#              ncores = config['ncores'],
-#              runtime = 16,
-#     shell:
-#          """
-#          samtools merge -@ {resources.ncores} {output.bam} {input}
-#          """
-
-# rule MergeAll:
-#     input:
-#          expand("consensus/{index}.aligned.bam", index=metadata.index.unique())
-#     output:
-#          bam = temp("consensus/{all}.tmp.bam")
-#     resources:
-#              mem = 8,
-#              ncores = config['ncores'],
-#              runtime = 16,
-#     shell:
-#          """
-#          samtools merge -@ {resources.ncores} {output.bam} {input} && samtools index {output.bam}
-#          """
-
-
-# rule DeepTools:
-#     input:
-#          bam = "consensus/{merged_id}.merged.mol_consensus.aligned.bam",
-#     output:
-#          met =  Metrics_OUT + "/{merged_id}.covmetrics.txt",
-#          plot = Metrics_OUT + "/{merged_id}.covplot.png"
-#     params:
-#           high_conf_region = EAVL_REGION_BED,
-#     resources:
-#           mem = 48,
-#           runtime = 24,
-#     shell:
-#         """
-#         plotCoverage -b {input.bam} -o {output.plot} --outCoverageMetrics {output.met} -ct 1 -ct 2 -ct 3 -ct 4 -ct 5 -ct 6 -ct 7 -ct 8 -ct 9 -ct 10 --BED {params.high_conf_region}
-#         """
-
-# rule SamDepth:
-#     input:
-#         bam = "consensus/{merged_id}.merged.mol_consensus.aligned.bam",
-#     output:
-#         Metrics_OUT + "/{merged_id}_merged.mol_consensus.covmetric.txt"
-#     resources:
-#        mem = 8,
-#        runtime = 24,
-#        ncores = config['ncores']
-#     params:
-#        high_conf_region = EAVL_REGION_BED,
-#     shell:
-#         """
-#         sambamba depth base {input} \
-#             -L {params.high_conf_region} \
-#             --min-coverage=0 \
-#             --min-base-quality=30 \
-#             -t {resources.ncores} \
-#             -F "mapping_quality >= 30" \
-#             -m \
-#             --combined 2>/dev/null \
-#             | cut -f 1-3 \
-#             | ../../../script/cov_sum.py > {output}
-#         """
-# rule CollectAlignmentSummaryMetrics:
-#     input:
-#          bam = "tmp/{id}.cds.raw.aligned.bam"
-#     output:
-#           metrics = Metrics_OUT + "/{id}.cds.raw.alignment_metrics.txt",
-#     params:
-#           ref = REF
-#     shell:
-#          """
-#          {PICARD} CollectAlignmentSummaryMetrics I={input.bam} O={output.metrics} R={params.ref}
-#          """
-
-# rule CollectInsertSizeMetrics:
-#     input:
-#          bam = "consensus/{merged_id}.merged.consensus.mol_consensus.aligned.bam",
-#     output:
-#           txt = Metrics_OUT + "/{merged_id}_merged.raw.insert_size_metrics.txt",
-#           hist = Metrics_OUT + "/{merged_id}_merged.raw.insert_size_histogram.pdf"
-#     shell:
-#          """
-#          {PICARD} CollectInsertSizeMetrics I={input.bam} O={output.txt} H={output.hist} M=0.5 W=600 DEVIATIONS=100
-#          """
