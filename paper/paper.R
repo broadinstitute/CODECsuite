@@ -219,7 +219,7 @@ ggplot(rbind(codec_bc8_weight, standard_bc8_weight), aes(y=Signature_3, x=mutect
 
 
 ####4b
-#first download ONC175142_ABS_MAF.short.vcf.highcmplexregion.maf and ONC175142.filtered.annotated.maf DUOS 
+#first download 175142_ABS_MAF.short.vcf.highcmplexregion.maf and 175142.filtered.annotated.maf DUOS 
 
 ##sensitivity
 ###alt>=1
@@ -233,20 +233,20 @@ high_coverage2 = process_recall_prec("figure4/b",
 high_coverage_alt2 = process_recall_prec("figure4/b/maf_alt2", 
                                      "figure4/mutect2", 
                                      sep = "_T",
-                                     codec_pat = "ONC175142_T.*ds.variants_called.txt.filtered.maf",
+                                     codec_pat = "175142_T.*ds.variants_called.txt.filtered.maf",
                                      mutect2_pat = "_ABS_MAF.short.vcf.highcmplexregion.maf")
 
 #####Precision
 high_coverage_allmut = process_recall_prec("figure4/b", 
                                      "figure4/mutect2", 
                                      sep = "_T",
-                                     codec_pat = "ONC175142_T.*.variants_called.txt",
+                                     codec_pat = "175142_T.*.variants_called.txt",
                                      mutect2_pat = "-filtered.annotated.maf")
 
 high_coverage_allmut_alt2 = process_recall_prec("figure4/b/maf_alt2", 
                                      "figure4/mutect2", 
                                      sep = "_T",
-                                     codec_pat = "ONC175142_T.*.filtered.maf",
+                                     codec_pat = "175142_T.*.filtered.maf",
                                      mutect2_pat = "-filtered.annotated.maf")
 
 alt1recall = high_coverage2$recall %>% filter(mut == "SNV" & concordant)
