@@ -112,3 +112,5 @@ lines if you indeed want to build CODEC-MSI
 less #lanes (e.g. for NovaSeq SP), comment out entire rules for DemuxL3 and DemuxL4. If you have more than 4 lanes (e.g. HiSeq X)
 either do 4 lane at a times or add more rules yourself. 
 
+3. The Snakemake pipeline setup file `qsub_wrapper.py` is specific to [UGE](https://en.wikipedia.org/wiki/Univa_Grid_Engine).
+You may need to change settings for your computing environment. 
