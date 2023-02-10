@@ -25,7 +25,7 @@ AGG_METRICS_SCRIPT=f"{CODEC_root}/snakemake/script/cds_summarize.py"
 AGG_LOG_SCRIPT=f"{CODEC_root}/snakemake/script/agg_log.py"
 SPLIT_SCRIPT=f"{CODEC_root}/snakemake/script/fastqsplit.pl"
 
-JAVA_PARAMS = "-Xmx30g -Djava.io.tmpdir=/broad/hptmp"
+JAVA_PARAMS = "-Xmx30g -Djava.io.tmpdir=/tmp"
 BWA = config['bwa']
 PICARD = f"java {JAVA_PARAMS} -jar $PICARD"
 GATK = f"{config['gatk4']} --java-options \"{JAVA_PARAMS}\""
@@ -51,9 +51,9 @@ rule SplitFastq1:
          lambda wildcards: batch_to_fastq.loc[wildcards.id]['fastq1']
     params:
           nsplit = nparallel,
-          prefix = "/broad/hptmp/ruolin/{id}_split_r1"
+          prefix = "hptmp/ruolin/{id}_split_r1"
     output:
-          split = temp(expand("/broad/hptmp/ruolin/{{id}}_split_r1.{ss}.fastq", ss = SPLITS))
+          split = temp(expand("hptmp/ruolin/{{id}}_split_r1.{ss}.fastq", ss = SPLITS))
     resources:
         mem = 8,
         runtime = 24
@@ -67,9 +67,9 @@ rule SplitFastq2:
          lambda wildcards: batch_to_fastq.loc[wildcards.id]['fastq2']
     params:
           nsplit = nparallel,
-          prefix = "/broad/hptmp/ruolin/{id}_split_r2"
+          prefix = "hptmp/ruolin/{id}_split_r2"
     output:
-          split = temp(expand("/broad/hptmp/ruolin/{{id}}_split_r2.{ss}.fastq", ss = SPLITS))
+          split = temp(expand("hptmp/ruolin/{{id}}_split_r2.{ss}.fastq", ss = SPLITS))
     resources:
         mem = 8,
         runtime = 24
@@ -80,8 +80,8 @@ rule SplitFastq2:
 
 rule DemuxL1:
     input:
-      read1 = "/broad/hptmp/ruolin/L001_split_r1.{ss}.fastq",
-      read2 = "/broad/hptmp/ruolin/L001_split_r2.{ss}.fastq",
+      read1 = "hptmp/ruolin/L001_split_r1.{ss}.fastq",
+      read2 = "hptmp/ruolin/L001_split_r2.{ss}.fastq",
       sample_sheet = lambda wildcards: batch_to_samplesheet.loc['L001']['sample_sheet']
     output:
       read1 = temp(expand("demux/L001_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L001']['sample'])),
@@ -102,8 +102,8 @@ rule DemuxL1:
 
 rule DemuxL2:
     input:
-      read1 = "/broad/hptmp/ruolin/L002_split_r1.{ss}.fastq",
-      read2 = "/broad/hptmp/ruolin/L002_split_r2.{ss}.fastq",
+      read1 = "hptmp/ruolin/L002_split_r1.{ss}.fastq",
+      read2 = "hptmp/ruolin/L002_split_r2.{ss}.fastq",
       sample_sheet = lambda wildcards: batch_to_samplesheet.loc['L002']['sample_sheet']
     output:
       read1 = temp(expand("demux/L002_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L002']['sample'])),
@@ -122,10 +122,11 @@ rule DemuxL2:
          {DEMUX} -1 {input.read1} -2 {input.read2} -p {input.sample_sheet} -o {params.outprefix} > {params.log}
      """
 
+##comment out the next two rules for flowcell with 2 lanes
 rule DemuxL3:
     input:
-      read1 = "/broad/hptmp/ruolin/L003_split_r1.{ss}.fastq",
-      read2 = "/broad/hptmp/ruolin/L003_split_r2.{ss}.fastq",
+      read1 = "hptmp/ruolin/L003_split_r1.{ss}.fastq",
+      read2 = "hptmp/ruolin/L003_split_r2.{ss}.fastq",
       sample_sheet = lambda wildcards: batch_to_samplesheet.loc['L003']['sample_sheet']
     output:
       read1 = temp(expand("demux/L003_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L003']['sample'])),
@@ -146,8 +147,8 @@ rule DemuxL3:
 
 rule DemuxL4:
     input:
-      read1 = "/broad/hptmp/ruolin/L004_split_r1.{ss}.fastq",
-      read2 = "/broad/hptmp/ruolin/L004_split_r2.{ss}.fastq",
+      read1 = "hptmp/ruolin/L004_split_r1.{ss}.fastq",
+      read2 = "hptmp/ruolin/L004_split_r2.{ss}.fastq",
       sample_sheet = lambda wildcards: batch_to_samplesheet.loc['L004']['sample_sheet']
     output:
       read1 = temp(expand("demux/L004_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L004']['sample'])),
@@ -275,7 +276,7 @@ rule SortBam:
     wildcard_constraints:
         index = "[0-9a-zA-Z_-]+"
     params:
-        temp = temp("/broad/hptmp/{batch_id}.{index}.raw.aligned.sortbyname")
+        temp = temp("hptmp/{batch_id}.{index}.raw.aligned.sortbyname")
     resources:
         mem = 8,
         runtime = 48,

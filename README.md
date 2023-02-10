@@ -104,6 +104,11 @@ output.variatns_called.txt: mutations from single fragments
 output.context_count.txt: trinucleotide context and dinucleotide context counts
 ```
 
-For CODEC-MSI please refer to [msi](./msi). And by default CMAKE will not build CODEC-MSI. Please uncomment the last two
+## Other notes
+1. For CODEC-MSI please refer to [msi](./msi). And by default CMAKE will not build CODEC-MSI. Please uncomment the last two
 lines if you indeed want to build CODEC-MSI
+
+2. The Snakemake is hard-coded to de-multiplex 4 lanes simultaneously (e.g. for NovaSeq 6000). If you need to de-multiplex
+less #lanes (e.g. for NovaSeq SP), comment out entire rules for DemuxL3 and DemuxL4. If you have more than 4 lanes (e.g. HiSeq X)
+either do 4 lane at a times or add more rules yourself. 
 
