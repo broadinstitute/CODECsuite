@@ -116,6 +116,7 @@ struct AccuOptions {
   bool all_mutant_frags = false;
   bool detail_qscore_prof = false;
   int pair_min_overlap = 0;
+  float family_agree_rate = 0.95;
 
 //obsolete
 //  double max_mismatch_frac = 1.0;
@@ -525,8 +526,10 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
     }
     errorstat.qcut_neval[0].first += q0den.first;
     errorstat.qcut_neval[0].second += q0den.second;
-    errorstat.qcut_neval[opt.bqual_min].first += r1_den;
-    errorstat.qcut_neval[opt.bqual_min].second += r2_den;
+    if (opt.bqual_min > 0) {
+      errorstat.qcut_neval[opt.bqual_min].first += r1_den;
+      errorstat.qcut_neval[opt.bqual_min].second += r2_den;
+    }
     bool fail_alignment_filter = false;
 
     if (!opt.cycle_level_stat.empty()) {
@@ -678,7 +681,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
         }
         for (unsigned ai = 0; ai < avars.size(); ++ai) {
           //R1R2 filter
-          if (readpair_var.size() == 1) {
+          if (readpair_var.size() == 1) { // var in only one read
             if (opt.count_read == 0) {
               if (readpair_var[0].isIndel()) ++errorstat.indel_R1R2_disagree;
               else ++errorstat.snv_R1R2_disagree;
@@ -880,18 +883,16 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
                 if (has_depth) {
                   int readpos = seg[ss].FirstFlag() ? avars[ai].r1_start : avars[ai].r2_start;
                   //std::cerr << seg[ss] << " read pos " << readpos << std::endl;
-                  if (fam_depth[readpos] < round(fsize * 0.95)) {
+                  if (fam_depth[readpos] < round(fsize * opt.family_agree_rate)) {
                     snv_family_disagree = true;
-                    std::cerr << avars[ai] << " 95% families not all agree on depth\n";
                     break;
                   }
                 }
                 bool has_error = cpputil::GetBTag(seg[ss], "ce", fam_error);
                 if (has_error) {
                   int readpos = seg[ss].FirstFlag() ? avars[ai].r1_start : avars[ai].r2_start;
-                  if (fam_error[readpos] > round(0.05 * fsize)) {
+                  if (fam_error[readpos] > round((1-opt.family_agree_rate) * fsize)) {
                     snv_family_disagree = true;
-                    std::cerr << avars[ai] << " 95% families not all agree on bases\n";
                     break;
                   }
                 }
@@ -1009,10 +1010,8 @@ int codec_accuracy(int argc, char ** argv) {
     } else if(opt.preset == "null") {
       opt.mapq = 0;
       opt.bqual_min = 0;
-      opt.max_snv_filter = MYINT_MAX;
-      opt.max_N_filter = MYINT_MAX;
       opt.min_fraglen = 0;
-      opt.germline_mindepth = 1;
+      opt.germline_mindepth = 0;
       opt.germline_var_maxdist = 0;
       opt.allow_indel_near_snv = true;
     } else {
