@@ -156,7 +156,7 @@ struct Variant {
     if (alt_seq.size() == 1 && contig_seq.size() == 1) {
       return 1;
     } else {
-      return abs(alt_seq.size() - contig_seq.size());
+      return abs((int) alt_seq.size() - (int) contig_seq.size());
     }
   }
 

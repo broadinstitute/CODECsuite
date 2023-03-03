@@ -9,6 +9,8 @@
 #include <vector>
 #include <map>
 #include <sstream>
+#include <numeric>
+
 
 namespace cpputil {
 inline void split_by_char(const std::string &s, char c,

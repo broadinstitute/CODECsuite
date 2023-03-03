@@ -466,7 +466,7 @@ class AdapterMatch {
     }
 
     if ((cds_mb.max_j - cds_mb.start_j >= junction_adapter_min_len_ &&
-        abs(cds_mb.start_j - cds_mb.start_i) <= junction_adapter_min_len_ * 0.1) // matched in similar distance to beginning
+        abs((int) cds_mb.start_j - (int) cds_mb.start_i) <= junction_adapter_min_len_ * 0.1) // matched in similar distance to beginning
       //  || (float) cds_mb.nmatch / cds_min_len >= 0.8) {
       || cds_mb_sgb.PI() >= 0.8) {
       ts.tm = TRIM;
@@ -492,7 +492,7 @@ class AdapterMatch {
       rc_cds_mb_sgb.Print(true);
     }
     if ((rc_cds_mb.max_j - rc_cds_mb.start_j >= junction_adapter_min_len_ &&
-        abs(rc_cds_mb.start_j - rc_cds_mb.start_i) <= junction_adapter_min_len_ * 0.1) // matched in similar distance to beginning
+        abs((int) rc_cds_mb.start_j - (int) rc_cds_mb.start_i) <= junction_adapter_min_len_ * 0.1) // matched in similar distance to beginning
         //|| (float) rc_cds_mb.nmatch / cds_min_len >= 0.8) {
         || rc_cds_mb_sgb.PI() >= 0.8) {
       ts.tm = TRIM;

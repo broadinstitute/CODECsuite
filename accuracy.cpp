@@ -693,13 +693,13 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
         int indel_near_r1_end = 0, indel_near_r2_end = 0;
         //std::cerr << var << ", " << var.r1_start << ", " << var.r2_start << ", " << orig_seqs[1].size() << std::endl;
         if (var.first_of_pair) {
-          if (var.r1_start + opt.min_indel_dist_from_readend > orig_seqs[0].size() || var.r1_start < opt.min_indel_dist_from_readend )
+          if (var.r1_start + opt.min_indel_dist_from_readend > (int) orig_seqs[0].size() || var.r1_start < opt.min_indel_dist_from_readend )
             indel_near_r1_end = 1;
           else
             indel_near_r1_end = -1;
         }
         if (var.second_of_pair) {
-          if (var.r2_start + opt.min_indel_dist_from_readend > orig_seqs[1].size() || var.r2_start < opt.min_indel_dist_from_readend )
+          if (var.r2_start + opt.min_indel_dist_from_readend > (int) orig_seqs[1].size() || var.r2_start < opt.min_indel_dist_from_readend )
             indel_near_r2_end = 1;
           else
             indel_near_r2_end = -1;
