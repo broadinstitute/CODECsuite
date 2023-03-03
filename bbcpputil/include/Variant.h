@@ -139,7 +139,7 @@ struct Variant {
     else return false;
   }
 
-  bool IndelLen() const {
+  int IndelLen() const {
     if (alt_seq.size() > contig_seq.size())
       return alt_seq.size() - contig_seq.size();
     else
