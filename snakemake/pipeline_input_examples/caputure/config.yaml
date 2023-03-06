@@ -1,0 +1,19 @@
+---
+input_meta: input.tsv
+cwd: codec
+ncores: 4
+nparallel: 40
+tmpdir: tmp
+ref: $HG19
+codec_root:
+dict: dummy
+gatk3:
+gatk4: gatk
+mutect:
+fgbio:
+bwa: bwa
+region_bed:
+region_interval_list:
+sampleid: 
+dbsnp:
+duplex_recovery_script: 

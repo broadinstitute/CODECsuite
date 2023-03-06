@@ -1,0 +1,2 @@
+sample_id	perc_error_free_positions	errors_per_base_sequenced	total_base_errors	total_bases_eval
+HD_82_sc_idtpancan_cfdna	0.9999874964364844	2.082512693175179e-07	10	48018915

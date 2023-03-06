@@ -1,0 +1,2 @@
+qcutoff	n_bases_eval	n_A_eval	n_C_eval	n_G_eval	n_T_eval	n_errors	erate	n_errors_masked_by_vcf2	num_pairs	num_unpaireds	n_discarded	q0_n_bases_eval	q0_n_errors	q0_erate	q0_R1_n_bases_eval	q0_R1_n_errors	q0_R1_erate	q0_R2_n_bases_eval	q0_R2_n_errors	q0_R2_erate
+30	957817927	284419959	194199263	194321021	284877683	8294	8.65927e-06	1106	4891574	0	61573	1034604544	59354	5.73688e-05	517302276	29239	5.65221e-05	517302268	30115	5.82155e-05

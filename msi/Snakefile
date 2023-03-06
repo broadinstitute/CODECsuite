@@ -1,0 +1,70 @@
+import pandas as pd
+metadata_file = config["input_meta"]
+metadata = pd.read_csv(metadata_file, sep="\t").set_index("pair")
+nparallel = config['nparallel'] if 'nparallel' in config else 40
+bed=""
+hg19=""
+gnomad_vcf=""
+workdir: config["cwd"]
+bedtools = "bedtools"
+
+rule all:
+    input:
+         expand("result/{pair}.{type}.filtered", pair = metadata.index, type=["all", "msi"])
+
+rule SplitBed:
+    input:
+        bed
+    params:
+        nsplit = nparallel,
+        prefix = "tmp/split_region_"
+    output:
+        splitbed = temp(expand("tmp/split_region_{id}.bed", id = [str(x).zfill(3) for x in range(nparallel)]))
+    shell:
+        """
+        split {input} -n l/{params.nsplit} -a 3 -d {params.prefix} --additional-suffix .bed
+        """
+
+rule MsiDetect:
+    input:
+        normal = lambda wildcards: metadata.loc[wildcards.pair][config['normal_col']],
+        tumor = lambda wildcards: metadata.loc[wildcards.pair]['tumor'],
+        bed = "tmp/split_region_{id}.bed"
+    params:
+        mapq = 50,
+        outprefix = "tmp/{pair}_region_{id}",
+        population_vcf = gnomad_vcf
+    output:
+        temp("tmp/{pair}_region_{id}.msi"),
+        temp("tmp/{pair}_region_{id}.all")
+    resources:
+        runtime = 2
+    shell:
+        """
+        msi -t {input.tumor} -n {input.normal} -L {input.bed} -m {params.mapq} -r {hg19} -o {params.outprefix} -V {params.population_vcf} -D -U DI -x 2
+        """
+
+rule AggMsi:
+    input:
+        expand("tmp/{{pair}}_region_{id}.{{type}}", id = [str(x).zfill(3) for x in range(nparallel)])
+    output:
+        "result/{pair}.{type}"
+    wildcard_constraints:
+        type = "[0-9a-zA-Z_]+"
+    shell:
+        """
+        cat {input} > {output}
+        """
+
+rule FilterGerm:
+    input:
+        msi = "result/{pair}.{type}",
+        germ_vcf = lambda wildcards: metadata.loc[wildcards.pair]['germ_vcf'],
+    output:
+        "result/{pair}.{type}.filtered"
+    wildcard_constraints:
+        type = "[0-9a-zA-Z_]+"
+    shell:
+        """
+        awk "{{OFS=\\"\\t\\"}};{{if (\$7 < 0.7 && \$8 < 0.7 ) {{print \$1,\$2-5,\$2+\$4+5,\$0}} }}" {input.msi} | {bedtools} intersect -a - -b {input.germ_vcf} -c | cut -f 4- | awk "\$NF == 0 && length(\$3) == 1 {{print \$0}}" > {output}
+        """

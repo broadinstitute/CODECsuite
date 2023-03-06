@@ -1,0 +1,2 @@
+sample_id	total_base_errors	total_bases_eval
+Dup_pan.05246_315_ctDNA	48116	679092661

@@ -1,0 +1,18 @@
+---
+input_meta: pipeline_input.tsv
+cwd: output
+ncores: 4
+nparallel: 40
+tmpdir: tmp
+ref: 
+codec_root: 
+dict: dummy
+gatk3: 
+gatk4: gatk
+bwa: 
+mutect: 
+fgbio: 
+region_bed: 
+region_interval_list: 
+sampleid: wgs1 
+dbsnp: 

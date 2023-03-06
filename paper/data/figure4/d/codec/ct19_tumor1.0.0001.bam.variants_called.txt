@@ -1,0 +1,5 @@
+chrom	ref_pos	ref	alt	type	read_pos	snv_base_qual	first_of_pair	read_name
+5	52539164	A	T	SNV	80	45	1	ct19_tumor1:14573081/A
+5	52539164	A	T	SNV	-51	45	0	ct19_tumor1:14573081/A
+10	77293662	T	G	SNV	-33	45	1	ct19_tumor1:27195508/B
+10	77293662	T	G	SNV	78	45	0	ct19_tumor1:27195508/B

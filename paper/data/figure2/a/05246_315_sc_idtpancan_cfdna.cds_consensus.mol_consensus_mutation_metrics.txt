@@ -1,0 +1,2 @@
+sample_id	perc_error_free_positions	errors_per_base_sequenced	total_base_errors	total_bases_eval
+05246_315_sc_idtpancan_cfdna	0.9999662262739575	3.752425207624222e-07	37	98602898

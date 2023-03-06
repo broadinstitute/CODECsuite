@@ -1,0 +1,141 @@
+include: "../Snakefile"
+GROUP_BY_UMI_DIR="groupbyumi"
+DETECT_DIR="detect"
+CONSENSUS_OUT="consensus_out"
+RECOVERY = config['duplex_recovery_script']
+COLLECT_DUPMET = f"python {RECOVERY}"
+
+rule all:
+    input:
+         expand(Metrics_OUT + "/byproduct/{batch_id}.{index}.byproduct.txt", zip, batch_id = metadata.reset_index()['batch'], index = metadata.reset_index()['sample']),
+         expand(Metrics_OUT + "/{index}.raw.umiHistogram.txt",index = metadata.reset_index()['sample']),
+         expand(Metrics_OUT + "/{index}.duplex_yield_metrics.txt",index=sample_names),
+         expand("sfc/{index}.error_metrics.txt", index=sample_names),
+         expand(Metrics_OUT + "/{index}.raw.hs_metrics.txt", index=sample_names),
+
+
+sample_to_maf = metadata.reset_index().groupby('sample').agg({'fingerprint_maf': set})
+sample_to_bait = metadata.reset_index().groupby('sample').agg({'bait_intervals': set})
+sample_to_bed = metadata.reset_index().groupby('sample').agg({'bait_bed': set})
+
+rule CollectRawHsMetrics:
+    input:
+         bam = "tmp/{index}.raw.replacerg.markdup.bam",
+    output:
+          metrics = Metrics_OUT + "/{index}.raw.hs_metrics.txt",
+          per_target_cov = Metrics_OUT  + "/{index}.raw.per_target_cov.txt"
+    params:
+          ref = REF,
+          bait = lambda wildcards: sample_to_bait.loc[wildcards.index]['bait_intervals'],
+    resources:
+             mem = 16,
+             runtime = 12
+    shell:
+         """
+         {PICARD} CollectHsMetrics COVERAGE_CAP=20000 I={input.bam} O={output.metrics} R={params.ref} BAIT_INTERVALS={params.bait} TARGET_INTERVALS={params.bait} PER_TARGET_COVERAGE={output.per_target_cov}
+         """
+
+##CODEC specific filters
+rule FilterMolecularConsensusReads:
+    input:
+        bam = "filtered/{index}.mol_consensus.aligned.bam"
+    output:
+        bam = "filtered/{index}.mol_consensus.filtered.bam",
+        bai = "filtered/{index}.mol_consensus.filtered.bam.bai"
+    resources:
+        mem = 8,
+        runtime = 24
+    shell:
+        """
+        {FILTER} -b {input.bam} -f 2 | samtools sort - -o {output.bam} && samtools index {output.bam}  
+        """
+
+rule CODEC_SFC:
+    input:
+        bam = "filtered/{index}.mol_consensus.filtered.bam"
+    output:
+        accu =  "sfc/{index}.mutant_metrics.txt",
+        call =  "sfc/{index}.variants_called.txt",
+        context = "sfc/{index}.context_count.txt",
+    params:
+        ref = REF,
+        high_conf_region = lambda wildcards : sample_to_bed.loc[wildcards.index]['bait_bed'],
+        germ_vcf = lambda wildcards : sample_to_vcf.loc[wildcards.index]['germline_vcf'],
+        germ_bam = lambda wildcards : sample_to_germbam.loc[wildcards.index]['germline_bam'],
+        mut_maf = lambda wildcards: sample_to_maf.loc[wildcards.index]['fingerprint_maf'],
+    resources:
+        mem = 8,
+        runtime = 96
+    shell:
+        """
+           {CALL_BIN}  -b {input.bam} \
+               -L {params.high_conf_region} \
+               -r {params.ref} \
+               -n {params.germ_bam} \
+               -m 60 \
+               -q 30 \
+               -d 12 \
+               -V {params.germ_vcf} \
+               -M {params.mut_maf} \
+               -x 2 \
+               -5 \
+               -g 30 \
+               -G 250 \
+               -Q 0.6 \
+               -N 0.03 \
+               -B 0.5 \
+               -Y 0 \
+               -a {output.accu} \
+               -e {output.call} \
+               -C {output.context}
+        """
+
+
+rule CollectRawInsertSizeMetrics:
+    input:
+         bam = "tmp/{batch_id}.{index}.raw.aligned.bam",
+    output:
+          txt = Metrics_OUT + "/{batch_id}.{index}.raw.insert_size_metrics.txt",
+          hist = Metrics_OUT + "/{batch_id}.{index}.raw.insert_size_histogram.pdf"
+    params:
+          ref = REF
+    shell:
+         """
+         {PICARD} CollectInsertSizeMetrics I={input.bam} O={output.txt} H={output.hist} M=0.5 W=900 DEVIATIONS=100
+         """
+
+rule SortGBUbam:
+    input:
+        GROUP_BY_UMI_DIR + "/{index}.raw.GroupedByUmi.bam",
+    output:
+        bam = GROUP_BY_UMI_DIR + "/{index}.sorted.GroupedByUmi.bam",
+        bai = GROUP_BY_UMI_DIR + "/{index}.sorted.GroupedByUmi.bai",
+    resources:
+        mem = 16,
+        runtime = 48
+    shell:
+        """
+        {PICARD} SortSam I={input} O={output.bam} SO=coordinate CREATE_INDEX=true MAX_RECORDS_IN_RAM=1000000
+        """
+
+
+rule DuplexRecoveryByTarget:
+    input:
+         GROUP_BY_UMI_DIR + "/{index}.raw.GroupedByUmi.bam",
+    output:
+         Metrics_OUT + "/{index}.duplex_yield_metrics.txt",
+    resources:
+         mem = 8,
+         runtime = 12
+    params:
+         interval = lambda wildcards: sample_to_bait.loc[wildcards.index]['bait_intervals'],
+    shell:
+         """
+         {COLLECT_DUPMET} --bam_file {input} \
+             -l {params.interval} \
+             --min_reads 1 \
+             -c \
+             -p \
+             -r \
+             -o {output}
+         """
