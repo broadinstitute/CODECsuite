@@ -6,7 +6,7 @@ Tested on Red Hat 7 and Ubuntu 18.04
 
 prerequisite for C++ based programs. For snakemake workflow check out [here](./snakemake)
 1. git
-2. gcc 5.2 or above with c++14 support
+2. tested with gcc 5.2 and 7.3 with c++14 support
 3. cmake 3.18.3 or above
 
 First, recursive clone the repo and create a build directory which will holds the installion files and final executables.
@@ -22,11 +22,23 @@ After this, you should be able to see an executable named `codec` in the build f
 ## Demultiplexing
 CODECsuite is expected to work with raw lane-level fastq.gz. This can be obtained from illumina [bcl2fastq](https://support.illumina.com/downloads/bcl2fastq-conversion-software-v2-20.html).
 The first step is demultiplexing and it requires a sample sheet in csv format for each lane which looks the following.
+Currently, we have used 12 barcodes. For good cluster generation, we recommend to have at least 4 sample barcodes per
+sequencing lane. 
 
 | SampleName | IndexBarcode1 | IndexBarcode2 |
 |------------|---------------|---------------|
-| sample_A   |GAGCCTACTCAGTCAACG|GTGTCGAACACTTGACGG|
-| sample_B   |CTTGAACGGACTGTCCAC|CACCGAGCGTTAGACTAC|
+|Sample01|CTTGAACGGACTGTCCAC|CACCGAGCGTTAGACTAC|
+|Sample02|GAGCCTACTCAGTCAACG|GTGTCGAACACTTGACGG|
+|Sample03|AGCTTGTAAGGCAGGTTA|ACTGATCTTCAGCTGACT|
+|Sample04|TCAAGCGTCTTACATGGT|TGAATCTGAGGCACTGTA|
+|Sample05|CTGGTCCAAGAACGTCTG|CTCTGAACGATCGAGCTC|
+|Sample06|GATCCAGTTCTGTCGAGC|GAGGTGCATGCACCTTAG|
+|Sample07|ACCTATAGGTGCAACGAA|ACTAACTTCCATTGCACT|
+|Sample08|TGAAGGTCCACTGTATCT|TGACCTGGATGGATAGGA|
+|Sample09|CACTGCTTCGAGACGAAG|CTCCAGTTACTGAGACGG|
+|Sample10|GTGATACCTCGATGCTCC|GAGGTCCAGTCTCTGTCC|
+|Sample11|ACTCAGAGAACTCATGGA|ACTACAGGTGGATCCAAT|
+|Sample12|TGAGCTGAGTTCGTACTT|TGATGTACCAACGATGTA|
 
 `codex demux -1 reads.r1.fastq.gz -2 reads.r2.fastq.gz -p sample_sheet.csv -o demux_outprefix `
 
