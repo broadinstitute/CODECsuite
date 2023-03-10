@@ -307,17 +307,18 @@ bool all_true_mut(vector<bool> v) {
 }
 
 template<class VariantsReader>
-bool search_var_in_database(const VariantsReader& variant_reader, const cpputil::Variant& var, std::ofstream& outf,
-                            std::string anno, std::vector<bool>& real_muts, bool fall_back_pos_only, int min_baseq, bool out_all_snps) {
+std::vector<bool> search_var_in_database(const VariantsReader& variant_reader, const cpputil::Variant& var, std::ofstream& outf,
+                            std::string anno, bool fall_back_pos_only, int min_baseq, bool out_all_snps) {
+  std::vector<bool> real_muts(var.alt_seq.size());
   if (variant_reader.var_exist(var.contig, var.contig_start, var.alt_seq)) { // known var
     if (var.isIndel()) {
       if (outf.is_open()) outf << var << '\t' << anno << '\n';
+      return {true};
     }
     else {
       std::fill(real_muts.begin(), real_muts.end(), true);
       if (outf.is_open() && (out_all_snps || var.var_qual >= min_baseq)) outf << var << '\t' << anno << '\n';
     }
-    return true;
   } else {
     if (var.isMNV()) { // rescue if MNV
       auto avars = cpputil::var_atomize(var);
@@ -329,15 +330,13 @@ bool search_var_in_database(const VariantsReader& variant_reader, const cpputil:
           real_muts[i] = true;
         }
       }
-      if(all_true_mut(real_muts)) return true;
     } else {
       if (fall_back_pos_only && variant_reader.var_exist(var.contig, var.contig_start)) {
-        real_muts[0] = true;
-        return true;
+        return {true};
       }
     }
-    return false;
   }
+  return real_muts;
 }
 
 

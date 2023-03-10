@@ -75,7 +75,6 @@ class IndexBarcode {
     int lowest_nm = std::numeric_limits<int>::max();
     int second_lowest_nm = std::numeric_limits<int>::max();
     int best_idx = 0;
-    int second_best_idx = 0;
     for (unsigned i  = 0; i < indexes.size(); ++i) {
       //int s = SSW(seq, indexes[i]);
       AffineGap ag(seq, indexes[i]);
@@ -84,11 +83,9 @@ class IndexBarcode {
       if (s < lowest_nm) {
         second_lowest_nm = lowest_nm;
         lowest_nm = s;
-        second_best_idx = best_idx;
         best_idx = i;
       } else if (s < second_lowest_nm) {
         second_lowest_nm = s;
-        second_best_idx = i;
       }
     }
     nm = lowest_nm;
