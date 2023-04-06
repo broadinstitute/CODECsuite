@@ -183,9 +183,9 @@ class IndexBarcode {
       match = "0";
       if (idx1 != -1 && idx2 != -1 && idx1 != idx2) conflict = "1";
     } else {
-      size_t stop = r1.id[r1.id.size() - 1] == ':' ? r1.id.size() : r1.id.size() - 1;
-      fq1_writers_[idx1].Write(r1.id.substr(0, stop) + r1b, r1.seq, r1.qual);
-      fq2_writers_[idx2].Write(r2.id.substr(0, stop) + r2b, r2.seq, r2.qual);
+      size_t stop = r1.id.find_last_of(':');
+      fq1_writers_[idx1].Write(r1.id.substr(0, stop) + ":" + r1b, r1.seq, r1.qual);
+      fq2_writers_[idx2].Write(r2.id.substr(0, stop) + ":" + r2b, r2.seq, r2.qual);
       match = "1";
       ++nmatched_[idx1];
     }
