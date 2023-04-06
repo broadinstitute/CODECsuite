@@ -251,7 +251,7 @@ class BCFReader {
           }
         } else {
           assert(ngt == 2); // assume single diploid sample
-          for (int j = 0; j < 2; ++j) { // 2 alleles, maternal, paternal
+          for (int j = 0; j < ngt; ++j) { // mostly 2 alleles, maternal, paternal
             int allele_index = bcf_gt_allele(gt[j]);
             if (allele_index == 0) continue;
             if (allele_index < 0 or allele_index >= rec->n_allele) {

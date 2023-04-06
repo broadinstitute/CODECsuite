@@ -234,7 +234,7 @@ void accuracy_print_help()
   std::cerr<< "-E/--min_indel_dist_readend            minimum distant of a INDEL to the end of a read [3].\n";
   std::cerr<< "--allow_indel_near_snv,                allow SNV to pass filter if a indel is found in the same read [false].\n";
   std::cerr<< "-g/--min_fraglen,                      Filter out a read if its fragment length is less than this value [30].\n";
-  std::cerr<< "-B/--max_frac_prim_AS,                 Filter out a read if the AS of secondary alignment is within this fraction of the primary alignment [0.75].\n";
+  std::cerr<< "-B/--max_frac_prim_AS,                 Filter out a read if the AS of the secondary alignment is >= this fraction times the AS of the primary alignment [FLOAT_MAX].\n";
   std::cerr<< "-Y/--min_germdepth,                    Minimum depth in germline bam [5].\n";
   std::cerr<< "-G/--max_fraglen,                      Filter out a read if its fragment length is larger than this value [INT_MAX].\n";
   //std::cerr<< "-p/--pair_min_overlap,                 When using selector, the minimum overlap between the two ends of the pair. -1 for complete overlap, 0 no overlap required [0].\n";
