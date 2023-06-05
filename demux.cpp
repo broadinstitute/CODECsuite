@@ -19,6 +19,7 @@ struct DemuxOptions {
   int index_begin = 3;
   int index_len = 18;
   int max_ed = 2;
+  int min_readlen = 30;
   bool include_non_pf = false;
   bool verbose = false;
   bool out_unmatch = false;
@@ -35,6 +36,7 @@ static struct option  demux_long_options[] = {
     {"ref",                      required_argument ,     0,        'r'},
     {"index_begin",              required_argument,      0,        'b'},
     {"index_len",                required_argument,      0,        'l'},
+    {"min_read_len",             required_argument,      0,        'm'},
     {"max_ed",                   required_argument,      0,        'e'},
     {"verbose",                  no_argument ,           0,        'v'},
     {"out_unmatch",                  no_argument ,           0,        'u'},
@@ -44,7 +46,7 @@ static struct option  demux_long_options[] = {
     {0,0,0,0}
 };
 
-const char* demux_short_options = "p:1:2:o:r:vib:l:e:cuh";
+const char* demux_short_options = "p:1:2:o:r:vib:l:e:cuh:m:";
 
 void codec_demux_usage()
 {
@@ -56,6 +58,7 @@ void codec_demux_usage()
   std::cerr<< "-2/--q2,                               Input read2\n";
   std::cerr<< "-b/--index_begin,                      The read position where the index begins (Default: 3) \n";
   std::cerr<< "-l/--index_len,                        Index length (Default: 18)\n";
+  std::cerr<< "-m/--min_read_len,                     Minimum read length (Default: 30)\n";
   std::cerr<< "-e/--max_ed,                           Maximum edit distance allowed as a match (Default: 2)\n";
   std::cerr<< "-o/--outprefix,                        Output path, e.g., /tmp/test\n";
   std::cerr<< "-r/--ref,                              Reference genome fasta file, for judging index hopping\n";
@@ -87,6 +90,9 @@ int demux_parse_options(int argc, char* argv[], DemuxOptions& opt) {
         break;
       case 'l':
         opt.index_len = atoi(optarg);
+        break;
+      case 'm':
+        opt.min_readlen = atoi(optarg);
         break;
       case 'e':
         opt.max_ed = atoi(optarg);
@@ -151,6 +157,7 @@ int codec_demux(int argc, char ** argv) {
     R2_reader.yield(read2);
     ++total_reads;
     if (not opt.include_non_pf and (read1.is_filtered() or read2.is_filtered())) continue;
+    if (read1.seq.length() < opt.min_readlen or read2.seq.length() < opt.min_readlen) continue;
     ++total_pf_reads;
     //if (opt.count_PF) continue;
     assert(read1.name() == read2.name());

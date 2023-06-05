@@ -492,7 +492,6 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
     if (seg.size() == 2) {
       orig_seqs = {seg[0].Sequence(), seg[1].Sequence()};
       orig_qualities = {seg[0].Qualities(), seg[1].Qualities()};
-      ++errorstat.n_pass_filter_pairs;
       cpputil::TrimPairFromFragEnd(seg.front(), seg.back(), opt.fragend_dist_filter);
     } else if(seg.size() == 1) {
       if (seg[0].FirstFlag()) {
@@ -502,38 +501,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
         orig_seqs[1] = seg[0].Sequence();
         orig_qualities[1] = seg[0].Qualities();
       }
-      ++errorstat.n_pass_filter_singles;
       cpputil::TrimSingleFromFragEnd(seg.front(), opt.fragend_dist_filter);
-    }
-
-    //for readlevel output
-    //int r1_q0_den = 0, r2_q0_den = 0;
-    //int r1_q0_nerror = 0, r2_q0_nerror = 0;
-    int r1_nerror = 0, r2_nerror = 0;
-    string chrname = seg.front().ChrName(bamheader);
-    // get denominator
-    std::pair<int, int> q0den(0, 0);
-    auto den = cpputil::CountDenom(seg, gr, ref, chrname, blacklist, errorstat, opt.bqual_min, q0den, true, opt.count_read, false);
-    int r1_den = den.first;
-    int r2_den = den.second;
-
-    std::string aux_prefix = std::to_string(pair_nmismatch) + "\t" + std::to_string(nqpass) +
-        "\t" + std::to_string(olen) + "\t" + std::to_string(abs(seg[0].InsertSize()));
-    if (opt.count_read) {
-      errorstat.neval += r1_den + r2_den;
-    } else {
-      errorstat.neval += r1_den;
-    }
-    errorstat.qcut_neval[0].first += q0den.first;
-    errorstat.qcut_neval[0].second += q0den.second;
-    if (opt.bqual_min > 0) {
-      errorstat.qcut_neval[opt.bqual_min].first += r1_den;
-      errorstat.qcut_neval[opt.bqual_min].second += r2_den;
-    }
-    bool fail_alignment_filter = false;
-
-    if (!opt.cycle_level_stat.empty()) {
-      CycleBaseCount(seg, gr, errorstat);
     }
     // first pass gets all variants in ROI
     std::map<cpputil::Variant, vector<cpputil::Variant>> var_vars;
@@ -561,6 +529,90 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
         if (var.contig_start >= rstart && var.EndPos() <= rend)
           var_vars[var].push_back(var);
       }
+    }
+
+    // alignment filter
+    int XS;
+    if (var_vars.size() > 0 and opt.max_frac_prim_AS < 1.0 and not seg[0].GetIntTag("XS", XS)) {
+      bool failed_AS = false;
+      for (unsigned ii =0; ii < seg.size(); ++ii) {
+        int rid = seg[ii].FirstFlag() ? 0 : 1;
+        int primary_score = 0, sec_as=0;
+        //alignment filter
+        //        if (seg.size() == 2) {
+        //          seq = cpputil::MergePairSeq(seg, orig_seqs, false);
+        //        } else {
+        //          seq = seg[0].Sequence();
+        //        }
+        mem_alnreg_v ar;
+        ar = mem_align1(bwa.GetMemOpt(), bwa.GetIndex()->bwt, bwa.GetIndex()->bns, bwa.GetIndex()->pac,
+                        orig_seqs[rid].length(), orig_seqs[rid].data());
+        if (ar.n >= 100) {
+          failed_AS = true;
+          free(ar.a);
+          break;
+        }
+        for (size_t idx = 0; idx < ar.n; ++idx) {
+          if (ar.a[idx].secondary < 0) {
+            primary_score = ar.a[idx].score;
+            break;
+          }
+        }
+        size_t idx = 0;
+        for (;idx < ar.n; ++idx) {
+          if (ar.a[idx].secondary >= 0) {
+            sec_as = std::max(sec_as, ar.a[idx].score);
+            if (ar.a[idx].score > primary_score * opt.max_frac_prim_AS) {
+              failed_AS = true;
+              break;
+            }
+          }
+        }
+        //std::cerr << seg[0].Qname() << "\t" << opt.max_frac_prim_AS << "\t" << primary_score <<"\t" << sec_as <<"\t" << ar.n << "\n";
+        if (failed_AS) {
+          free(ar.a);
+          break;
+        }
+        free(ar.a);
+      }
+      if (failed_AS) {
+        ++errorstat.AS_filter;
+        continue;
+      }
+    }
+    if (seg.size() == 2) {
+      ++errorstat.n_pass_filter_pairs;
+    } else if(seg.size() == 1) {
+      ++errorstat.n_pass_filter_singles;
+    }
+
+    //for readlevel output
+    //int r1_q0_den = 0, r2_q0_den = 0;
+    //int r1_q0_nerror = 0, r2_q0_nerror = 0;
+    int r1_nerror = 0, r2_nerror = 0;
+    string chrname = seg.front().ChrName(bamheader);
+    // get denominator
+    std::pair<int, int> q0den(0, 0);
+    auto den = cpputil::CountDenom(seg, gr, ref, chrname, blacklist, errorstat, opt.bqual_min, q0den, true, opt.count_read, false);
+    int r1_den = den.first;
+    int r2_den = den.second;
+
+    std::string aux_prefix = std::to_string(pair_nmismatch) + "\t" + std::to_string(nqpass) +
+        "\t" + std::to_string(olen) + "\t" + std::to_string(abs(seg[0].InsertSize()));
+    if (opt.count_read) {
+      errorstat.neval += r1_den + r2_den;
+    } else {
+      errorstat.neval += r1_den;
+    }
+    errorstat.qcut_neval[0].first += q0den.first;
+    errorstat.qcut_neval[0].second += q0den.second;
+    if (opt.bqual_min > 0) {
+      errorstat.qcut_neval[opt.bqual_min].first += r1_den;
+      errorstat.qcut_neval[opt.bqual_min].second += r2_den;
+    }
+
+    if (!opt.cycle_level_stat.empty()) {
+      CycleBaseCount(seg, gr, errorstat);
     }
 
     std::vector<std::vector<cpputil::Variant>> refined_vars;
@@ -594,63 +646,10 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
       auto var = cpputil::squash_vars(readpair_var);
       //int known_indel_len = 0;
 
-      // alignment filter
-      int XS;
-      if (opt.max_frac_prim_AS < 1.0 and not seg[0].GetIntTag("XS", XS)) {
-        int primary_score = 0, sec_as=0;
-        //alignment filter
-        std::string seq;
-        if (seg.size() == 2) {
-          seq = cpputil::MergePairSeq(seg, orig_seqs, false);
-        } else {
-          seq = seg[0].Sequence();
-        }
-        mem_alnreg_v ar;
-        ar = mem_align1(bwa.GetMemOpt(), bwa.GetIndex()->bwt, bwa.GetIndex()->bns, bwa.GetIndex()->pac,
-                        seq.length(), seq.data());
-        if (ar.n >= 100) {
-          fail_alignment_filter = true;
-          free(ar.a);
-          continue;
-        }
-        for (size_t idx = 0; idx < ar.n; ++idx) {
-          if (ar.a[idx].secondary < 0) {
-            primary_score = ar.a[idx].score;
-            break;
-          }
-        }
-        size_t idx = 0;
-        for (;idx < ar.n; ++idx) {
-          if (ar.a[idx].secondary >= 0) {
-            sec_as = std::max(sec_as, ar.a[idx].score);
-            if (ar.a[idx].score > primary_score * opt.max_frac_prim_AS) {
-              break;
-            }
-          }
-        }
-        //std::cerr << seg[0].Qname() << "\t" << opt.max_frac_prim_AS << "\t" << primary_score <<"\t" << sec_as <<"\t" << ar.n << "\n";
-        if (idx < ar.n) {
-          fail_alignment_filter = true;
-          free(ar.a);
-          continue;
-        }
-        free(ar.a);
-      }
       //string aux_output = aux_prefix + "\t" + std::to_string(primary_score) + "\t"  + std::to_string(sec_as);
 
       //pass alignment filters
       int nerr = 0;
-//      std::vector<cpputil::Variant> avars;
-//      if (n_true_mut(real_muts) > 0) { // partially wrong
-//        auto tmpvar = cpputil::var_atomize(var);
-//        for (unsigned ai = 0; ai < real_muts.size(); ++ai) {
-//          if (not real_muts[ai]) {
-//            avars.push_back(tmpvar[ai]);
-//          }
-//        }
-//      } else { // fully wrong
-//        avars.push_back(var);
-//      }
       //R1R2 filter
       if (readpair_var.size() == 1) { // var in only one read
         if (opt.count_read == 0) {
@@ -783,8 +782,9 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
           int exact_match = 0, fuzzy_match = 0;
           germ_depth = cpputil::ScanIndel(&pileup, true, ref, var.contig, var.contig_start,
                                           (int) var.alt_seq.size() - (int) var.contig_seq.size(),
-                                          var.alt_seq.substr(1), true, opt.germline_var_maxdist,
+                                          var.alt_seq.substr(1), false, opt.germline_var_maxdist,
                                           opt.germline_cutoff_vaf, 10, opt.germline_minbq, exact_match, fuzzy_match);
+          std::cerr << exact_match << ", " <<fuzzy_match << std::endl;
           if (exact_match > 0 or fuzzy_match > 1) {
             ++errorstat.seen_in_germ;
             continue;
@@ -1009,9 +1009,6 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
           }
         }
       } //end other profiles
-    }
-    if (fail_alignment_filter) {
-      ++errorstat.AS_filter;
     }
 
     if (readlevel.is_open()) {
