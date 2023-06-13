@@ -1,15 +1,16 @@
 include: "../Snakefile"
-TRUTH_BCF= config['bcf']
 EVAL_REGION_BED= config['region_bed']
 EVAL_REGION_IL= config['region_interval_list']
 DBSNP= config['dbsnp']
 
 rule all:
     input:
-        expand("{method}/{index}.mutant_metrics.txt", index = sample_names, method=['raw_accu', ACCU_OUT]),
+        expand(Metrics_OUT + "/{index}.mol_consensus.wgs_metrics.txt",index = sample_names),
+        expand(ACCU_OUT + "/{index}.mutant_metrics.txt", index = sample_names),
+        expand("raw_sfc/{index}.mutant_metrics.txt", index = sample_names),
         expand(Metrics_OUT + "/{index}.raw.insert_size_metrics.txt",index = sample_names),
         expand(Metrics_OUT + "/byproduct/{batch_id}.{index}.byproduct.txt", zip, batch_id = metadata.reset_index()['batch'], index = metadata.reset_index()['sample']),
-        expand(Metrics_OUT + "/{index}.{type}.wgs_metrics.txt",index = sample_names, type=['raw'])
+        expand(Metrics_OUT + "/{index}.raw.wgs_metrics.txt",index = sample_names)
 
 rule CollectRawWgsMetrics:
     input:
@@ -19,20 +20,26 @@ rule CollectRawWgsMetrics:
     params:
           ref = REF,
           itl = EVAL_REGION_IL
+    resources:
+          mem = 16,
+          runtime = 96
     shell:
          """
          {PICARD} CollectWgsMetrics I={input.bam} O={output.metrics} R={params.ref} INTERVALS={params.itl} \
-         INCLUDE_BQ_HISTOGRAM=true
+         COUNT_UNPAIRED=true MINIMUM_BASE_QUALITY=0 MINIMUM_MAPPING_QUALITY=0
          """
 
 rule CollectWgsMetrics:
     input:
          bam = "consensus/{index}.replacerg.markdup.bam",
     output:
-          metrics = Metrics_OUT + "/{index}.wgs_metrics.txt",
+          metrics = Metrics_OUT + "/{index}.mol_consensus.wgs_metrics.txt",
     params:
           ref = REF,
           itl = EVAL_REGION_IL
+    resources:
+          mem = 16,
+          runtime = 96
     shell:
          """
          {PICARD} CollectWgsMetrics I={input.bam} O={output.metrics} R={params.ref} INTERVALS={params.itl} \
@@ -52,7 +59,7 @@ rule CollectFinalWgsMetrics:
          {PICARD} CollectWgsMetrics I={input.bam} O={output.metrics} R={params.ref} INTERVALS={params.itl} INCLUDE_BQ_HISTOGRAM=true MINIMUM_BASE_QUALITY=30
          """
 #
-rule CDSErrorMetrics:
+rule CSS_SFC_ErrorMetrics:
     input:
          bam = "consensus/{index}.mol_consensus.aligned.bam",
     output:
@@ -64,6 +71,7 @@ rule CDSErrorMetrics:
           high_conf_region = EVAL_REGION_BED,
           dbsnp = DBSNP,
           germ_bam = lambda wildcards : sample_to_germbam.loc[wildcards.index]['germline_bam'],
+          #germ_vcf = lambda wildcards : sample_to_germvcf.loc[wildcards.index]['germline_vcf'],
     resources:
              mem = 16,
              runtime = 96
@@ -72,19 +80,19 @@ rule CDSErrorMetrics:
             {CALL_BIN}  -b {input.bam} \
                 -L {params.high_conf_region} \
                 -r {params.ref} \
-                -n {params.germ_bam} \
                 -m 60 \
                 -q 30 \
                 -d 12 \
+                -n {params.germ_bam} \
                 -V {params.dbsnp} \
-                -x 10 \
-                -c 6 \
+                -x 6 \
+                -c 4 \
                 -5 \
                 -g 30 \
                 -G 250 \
                 -Q 0.7 \
                 -B 0.6 \
-                -N 0.1 \
+                -N 0.05 \
                 -Y 5 \
                 -W 1 \
                 -a {output.accu} \
@@ -92,18 +100,19 @@ rule CDSErrorMetrics:
                 -C {output.context}
          """
 
-rule RawCDSErrorMetrics:
+rule RAW_SFC_ErrorMetrics:
     input:
          bam = "tmp/{index}.raw.replacerg.markdup.bam"
     output:
-          accu = "raw_accu/{index}.mutant_metrics.txt",
-          called = "raw_accu/{index}.variants_called.txt",
-          context = "raw_accu/{index}.context_count.txt",
+          accu = "raw_sfc/{index}.mutant_metrics.txt",
+          called = "raw_sfc/{index}.variants_called.txt",
+          context = "raw_sfc/{index}.context_count.txt",
     params:
           ref = REF,
           high_conf_region = EVAL_REGION_BED,
           dbsnp = DBSNP,
           germ_bam = lambda wildcards : sample_to_germbam.loc[wildcards.index]['germline_bam'],
+          #germ_vcf = lambda wildcards : sample_to_germvcf.loc[wildcards.index]['germline_vcf'],
     resources:
              mem = 16,
              runtime = 96
@@ -112,22 +121,21 @@ rule RawCDSErrorMetrics:
             {CALL_BIN}  -b {input.bam} \
                 -L {params.high_conf_region} \
                 -r {params.ref} \
-                -n {params.germ_bam} \
                 -m 60 \
+                -n {params.germ_bam} \
                 -q 30 \
                 -d 12 \
                 -V {params.dbsnp} \
-                -x 5 \
-                -c 3 \
+                -x 6 \
+                -c 4 \
                 -5 \
                 -g 30 \
                 -G 250 \
-                -Q 0.5 \
-                -B 0.5 \
+                -Q 0.6 \
+                -B 0.6 \
                 -N 0.1 \
                 -Y 5 \
                 -W 1 \
-                --min_passQ_frac_TT 0.6 \
                 -a {output.accu} \
                 -e {output.called} \
                 -C {output.context}
