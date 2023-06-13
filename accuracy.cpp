@@ -562,7 +562,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
         for (;idx < ar.n; ++idx) {
           if (ar.a[idx].secondary >= 0) {
             sec_as = std::max(sec_as, ar.a[idx].score);
-            if (ar.a[idx].score > primary_score * opt.max_frac_prim_AS) {
+            if (ar.a[idx].score >= primary_score * opt.max_frac_prim_AS) {
               failed_AS = true;
               break;
             }
