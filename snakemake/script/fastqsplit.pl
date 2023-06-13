@@ -5,14 +5,17 @@
 # @update Jul-05-2015
 # Round robin split 
 
+### modified by Ruolin Liu to read the file from stdin
 use warnings;
 use strict;
 use Symbol;
 
-my ($file, $base, $outN) = @ARGV;
+#my ($file, $base, $outN) = @ARGV;
+my ($base, $outN) = @ARGV;
 
 $outN ||= 2;
-($file and $base) or die "
+#($file and $base) or die "
+($base) or die "
 Usage
    $0 in_file.fq out_base[ no_files]
    
@@ -32,8 +35,8 @@ for my $i (1 .. $outN){
 
 
 my($i, $seq) = (-1, '');
-open FILE, "<", $file or die "I can not read the file: $file: $!\n";
-while(my $ln=<FILE>){
+#open FILE, "<", $file or die "I can not read the file: $file: $!\n";
+while(my $ln=<STDIN>){
    if($.%4 == 1){
       print { $outSym[$i % $outN] } $seq if $seq;
       $i++;
@@ -42,7 +45,7 @@ while(my $ln=<FILE>){
    $seq.=$ln;
 }
 print { $outSym[$i % $outN] } $seq if $seq;
-close FILE;
+#close FILE;
 
 for(my $j=0; $j<$outN; $j++){
    close $outSym[$j];
