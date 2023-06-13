@@ -84,7 +84,7 @@ for batch in batch_ids:
         input:
           read1 = f"/broad/hptmp/ruolin/{batch}_split_r1.{{ss}}.fastq",
           read2 = f"/broad/hptmp/ruolin/{batch}_split_r2.{{ss}}.fastq",
-          sample_sheet = lambda wildcards: batch_to_samplesheet.loc[batch]['sample_sheet']
+          sample_sheet = batch_to_samplesheet.loc[batch]['sample_sheet']
         output:
           read1 = temp(expand("demux/%s_split.{{ss}}.{index}.1.fastq.gz" % batch, index = batch_to_samples.loc[batch]['sample'])),
           read2 = temp(expand("demux/%s_split.{{ss}}.{index}.2.fastq.gz" % batch,  index = batch_to_samples.loc[batch]['sample'])),
