@@ -628,7 +628,17 @@ int FailFilter(const vector<cpputil::Segments>& frag,
     bool xsstat = s.GetIntTag("XS", XS);
     bool asstat = s.GetIntTag("AS", AS);
     if (xsstat and asstat) {
-      if (XS > AS * opt.max_frac_prim_AS) {
+      if (XS >= AS * opt.max_frac_prim_AS) {
+        ++errorstat.AS_filter;
+        return 8;
+      }
+    }
+    std::string spa;
+    bool sastat = s.GetZTag("SA", spa);
+    if (sastat) {
+      std::vector<std::string> sa_fields;
+      split_by_char(spa, ',', sa_fields);
+      if (stoi(sa_fields[4]) >= opt.mapq * opt.max_frac_prim_AS) {
         ++errorstat.AS_filter;
         return 8;
       }
