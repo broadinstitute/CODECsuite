@@ -44,16 +44,16 @@ batch_to_fastq = metadata.reset_index().groupby('batch').agg({'fastq1' : set, 'f
 batch_to_samplesheet = metadata.reset_index().groupby('batch').agg({'sample_sheet' : set})
 batch_to_samples = metadata.reset_index().groupby('batch').agg({'sample' : set})
 sample_to_batch = metadata.reset_index().groupby('sample').agg({'batch' : set})
-#sample_to_vcf = metadata.reset_index().groupby('sample').agg({'germline_vcf' : set})
+#sample_to_germvcf = metadata.reset_index().groupby('sample').agg({'germline_vcf' : set})
 sample_to_germbam = metadata.reset_index().groupby('sample').agg({'germline_bam' : set})
 rule SplitFastq1:
     input:
          lambda wildcards: batch_to_fastq.loc[wildcards.id]['fastq1']
     params:
           nsplit = nparallel,
-          prefix = "hptmp/ruolin/{id}_split_r1"
+          prefix = "/broad/hptmp/ruolin/{id}_split_r1"
     output:
-          split = temp(expand("hptmp/ruolin/{{id}}_split_r1.{ss}.fastq", ss = SPLITS))
+          split = temp(expand("/broad/hptmp/ruolin/{{id}}_split_r1.{ss}.fastq", ss = SPLITS))
     resources:
         mem = 8,
         runtime = 24
@@ -67,9 +67,9 @@ rule SplitFastq2:
          lambda wildcards: batch_to_fastq.loc[wildcards.id]['fastq2']
     params:
           nsplit = nparallel,
-          prefix = "hptmp/ruolin/{id}_split_r2"
+          prefix = "/broad/hptmp/ruolin/{id}_split_r2"
     output:
-          split = temp(expand("hptmp/ruolin/{{id}}_split_r2.{ss}.fastq", ss = SPLITS))
+          split = temp(expand("/broad/hptmp/ruolin/{{id}}_split_r2.{ss}.fastq", ss = SPLITS))
     resources:
         mem = 8,
         runtime = 24
@@ -78,94 +78,30 @@ rule SplitFastq2:
          zcat {input} | {SPLIT_SCRIPT} {params.prefix} {params.nsplit}
          """
 
-rule DemuxL1:
-    input:
-      read1 = "hptmp/ruolin/L001_split_r1.{ss}.fastq",
-      read2 = "hptmp/ruolin/L001_split_r2.{ss}.fastq",
-      sample_sheet = lambda wildcards: batch_to_samplesheet.loc['L001']['sample_sheet']
-    output:
-      read1 = temp(expand("demux/L001_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L001']['sample'])),
-      read2 = temp(expand("demux/L001_split.{{ss}}.{index}.2.fastq.gz",  index = batch_to_samples.loc['L001']['sample'])),
-    resources:
-     mem = 8,
-     runtime = 24
-    wildcard_constraints:
-       ss = "[0-9]+"
-    params:
-     outprefix = "demux/L001_split.{ss}",
-     log = "demux/L001_split.{ss}.log",
-     ref = {REF}
-    shell:
-     """
-         {DEMUX} -1 {input.read1} -2 {input.read2} -p {input.sample_sheet} -o {params.outprefix} > {params.log}
-     """
+for batch in batch_ids:
+    rule:
+        name: f"Demux_{batch}"
+        input:
+          read1 = f"/broad/hptmp/ruolin/{batch}_split_r1.{{ss}}.fastq",
+          read2 = f"/broad/hptmp/ruolin/{batch}_split_r2.{{ss}}.fastq",
+          sample_sheet = batch_to_samplesheet.loc[batch]['sample_sheet']
+        output:
+          read1 = temp(expand("demux/%s_split.{{ss}}.{index}.1.fastq.gz" % batch, index = batch_to_samples.loc[batch]['sample'])),
+          read2 = temp(expand("demux/%s_split.{{ss}}.{index}.2.fastq.gz" % batch,  index = batch_to_samples.loc[batch]['sample'])),
+        resources:
+         mem = 8,
+         runtime = 24
+        wildcard_constraints:
+           ss = "[0-9]+"
+        params:
+         outprefix = f"demux/{batch}_split.{{ss}}",
+         log = f"demux/{batch}_split.{{ss}}.log",
+         ref = {REF}
+        shell:
+         """
+             {DEMUX} -1 {input.read1} -2 {input.read2} -p {input.sample_sheet} -o {params.outprefix} > {params.log}
+         """
 
-rule DemuxL2:
-    input:
-      read1 = "hptmp/ruolin/L002_split_r1.{ss}.fastq",
-      read2 = "hptmp/ruolin/L002_split_r2.{ss}.fastq",
-      sample_sheet = lambda wildcards: batch_to_samplesheet.loc['L002']['sample_sheet']
-    output:
-      read1 = temp(expand("demux/L002_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L002']['sample'])),
-      read2 = temp(expand("demux/L002_split.{{ss}}.{index}.2.fastq.gz",  index = batch_to_samples.loc['L002']['sample'])),
-    resources:
-     mem = 8,
-     runtime = 24
-    wildcard_constraints:
-       ss = "[0-9]+"
-    params:
-     outprefix = "demux/L002_split.{ss}",
-     log = "demux/L002_split.{ss}.log",
-     ref = {REF}
-    shell:
-     """
-         {DEMUX} -1 {input.read1} -2 {input.read2} -p {input.sample_sheet} -o {params.outprefix} > {params.log}
-     """
-
-##comment out the next two rules for flowcell with 2 lanes
-rule DemuxL3:
-    input:
-      read1 = "hptmp/ruolin/L003_split_r1.{ss}.fastq",
-      read2 = "hptmp/ruolin/L003_split_r2.{ss}.fastq",
-      sample_sheet = lambda wildcards: batch_to_samplesheet.loc['L003']['sample_sheet']
-    output:
-      read1 = temp(expand("demux/L003_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L003']['sample'])),
-      read2 = temp(expand("demux/L003_split.{{ss}}.{index}.2.fastq.gz",  index = batch_to_samples.loc['L003']['sample'])),
-    resources:
-     mem = 8,
-     runtime = 24
-    wildcard_constraints:
-       ss = "[0-9]+"
-    params:
-     outprefix = "demux/L003_split.{ss}",
-     log = "demux/L003_split.{ss}.log",
-     ref = {REF}
-    shell:
-     """
-         {DEMUX} -1 {input.read1} -2 {input.read2} -p {input.sample_sheet} -o {params.outprefix} > {params.log}
-     """
-
-rule DemuxL4:
-    input:
-      read1 = "hptmp/ruolin/L004_split_r1.{ss}.fastq",
-      read2 = "hptmp/ruolin/L004_split_r2.{ss}.fastq",
-      sample_sheet = lambda wildcards: batch_to_samplesheet.loc['L004']['sample_sheet']
-    output:
-      read1 = temp(expand("demux/L004_split.{{ss}}.{index}.1.fastq.gz", index = batch_to_samples.loc['L004']['sample'])),
-      read2 = temp(expand("demux/L004_split.{{ss}}.{index}.2.fastq.gz",  index = batch_to_samples.loc['L004']['sample'])),
-    resources:
-     mem = 8,
-     runtime = 24
-    wildcard_constraints:
-       ss = "[0-9]+"
-    params:
-     outprefix = "demux/L004_split.{ss}",
-     log = "demux/L004_split.{ss}.log",
-     ref = {REF}
-    shell:
-     """
-         {DEMUX} -1 {input.read1} -2 {input.read2} -p {input.sample_sheet} -o {params.outprefix} > {params.log}
-     """
 
 rule Trim:
     input:
@@ -276,7 +212,7 @@ rule SortBam:
     wildcard_constraints:
         index = "[0-9a-zA-Z_-]+"
     params:
-        temp = temp("hptmp/{batch_id}.{index}.raw.aligned.sortbyname")
+        temp = temp("/broad/hptmp/{batch_id}.{index}.raw.aligned.sortbyname")
     resources:
         mem = 8,
         runtime = 48,
@@ -355,13 +291,9 @@ rule MarkRawDuplicates:
     output:
         bam = "tmp/{index}.raw.replacerg.markdup.bam",
         met = "metrics/{index}.raw.marked_duplicates.txt",
-        umi = "metrics/{index}.raw.umi_metrics.txt"
     shell:
         """
-        {PICARD} UmiAwareMarkDuplicatesWithMateCigar I={input.bam} O={output.bam} M={output.met} UMI_METRICS={output.umi} \
-            CREATE_INDEX=true \
-            CLEAR_DT=false DUPLEX_UMI=true BARCODE_TAG=RX \
-            TAG_DUPLICATE_SET_MEMBERS=true TAGGING_POLICY=All PG=null
+        {PICARD} MarkDuplicates I={input.bam} O={output.bam} M={output.met} CREATE_INDEX=true TAG_DUPLICATE_SET_MEMBERS=true TAGGING_POLICY=All
         """
 
 
@@ -378,10 +310,10 @@ rule CollectInsertSizeMetrics:
 
 rule GroupReadByUMI:
     input:
-         "tmp/{index}.raw.replacerg.bam"
+         "tmp/{index}.raw.replacerg.markdup.bam"
          #"tmp/{index}.cds_consensus.aligned.bam",
     output:
-         bam = "groupbyumi/{index}.GroupedByUmi.bam",
+         bam = temp("groupbyumi/{index}.GroupedByUmi.bam"),
          histogram = Metrics_OUT + "/{index}.umiHistogram.txt"
     resources:
              mem = 8,
@@ -435,7 +367,7 @@ rule AlignMolecularConsensusReads:
     shell:
          """
          samtools fastq {input} \
-         | {BWA} mem -K 100000000 -t {resources.ncores} -p -Y {params.reference} - > {output} 
+         | bwa mem -K 100000000 -t {resources.ncores} -p -Y {params.reference} - > {output}
          """
 
 rule MergeAndSortMoleculeConsensusReads:
