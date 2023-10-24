@@ -4,6 +4,8 @@
 
 #ifndef CPPUTIL_INCLUDE_BAMRECORDEXT_CPP_H_
 #define CPPUTIL_INCLUDE_BAMRECORDEXT_CPP_H_
+
+#include <limits>
 #include<set>
 #include <SeqLib/BamRecord.h>
 #include "SeqLib/RefGenome.h"
