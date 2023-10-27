@@ -6,7 +6,6 @@
 #include <fstream>
 #include <string>
 #include <getopt.h>
-#include "spoa/spoa.hpp"
 
 #include "Alignment.h"
 #include "AlignmentConsensus.h"
@@ -228,35 +227,7 @@ int codec_consensus(int argc, char ** argv) {
       }
     }
   } else if (opt.consensus_mode == -1) { // dummy code for denovo consensus
-    std::vector<std::string> sequences = {
-        "CATAAAAGAACGTAGGTCGCCCGTCCGTAACCTGTCGGATCACCGGAAAGGACCCGTAAAGTGATAATGAT",
-        "ATAAAGGCAGTCGCTCTGTAAGCTGTCGATTCACCGGAAAGATGGCGTTACCACGTAAAGTGATAATGATTAT",
-        "ATCAAAGAACGTGTAGCCTGTCCGTAATCTAGCGCATTTCACACGAGACCCGCGTAATGGG",
-        "CGTAAATAGGTAATGATTATCATTACATATCACAACTAGGGCCGTATTAATCATGATATCATCA",
-        "GTCGCTAGAGGCATCGTGAGTCGCTTCCGTACCGCAAGGATGACGAGTCACTTAAAGTGATAAT",
-        "CCGTAACCTTCATCGGATCACCGGAAAGGACCCGTAAATAGACCTGATTATCATCTACAT"
-    };
-
-    auto alignment_engine = spoa::AlignmentEngine::Create(
-        spoa::AlignmentType::kOV, 3, -5, -5, -2);  // linear gaps
-
-    spoa::Graph graph{};
-
-    for (const auto& it : sequences) {
-      auto alignment = alignment_engine->Align(it, graph);
-      graph.AddAlignment(alignment, it);
-    }
-
-    auto consensus = graph.GenerateConsensus();
-
-    std::cerr << ">Consensus LN:i:" << consensus.size() << std::endl
-              << consensus << std::endl;
-
-    auto msa = graph.GenerateMultipleSequenceAlignment(true);
-
-    for (const auto& it : msa) {
-      std::cerr << it << std::endl;
-    }
+    std::cerr << "denovo consensus yet to be build\n"; 
   } else {
     std::cerr << "Consensus mode should be either 0 or 1\n";
     return 1;
