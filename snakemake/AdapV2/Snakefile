@@ -51,9 +51,9 @@ rule SplitFastq1:
          lambda wildcards: batch_to_fastq.loc[wildcards.id]['fastq1']
     params:
           nsplit = nparallel,
-          prefix = "/broad/hptmp/ruolin/{id}_split_r1"
+          prefix = "/tmp/ruolin/{id}_split_r1"
     output:
-          split = temp(expand("/broad/hptmp/ruolin/{{id}}_split_r1.{ss}.fastq", ss = SPLITS))
+          split = temp(expand("/tmp/ruolin/{{id}}_split_r1.{ss}.fastq", ss = SPLITS))
     resources:
         mem = 8,
         runtime = 24
@@ -67,9 +67,9 @@ rule SplitFastq2:
          lambda wildcards: batch_to_fastq.loc[wildcards.id]['fastq2']
     params:
           nsplit = nparallel,
-          prefix = "/broad/hptmp/ruolin/{id}_split_r2"
+          prefix = "/tmp/ruolin/{id}_split_r2"
     output:
-          split = temp(expand("/broad/hptmp/ruolin/{{id}}_split_r2.{ss}.fastq", ss = SPLITS))
+          split = temp(expand("/tmp/ruolin/{{id}}_split_r2.{ss}.fastq", ss = SPLITS))
     resources:
         mem = 8,
         runtime = 24
@@ -82,8 +82,8 @@ for batch in batch_ids:
     rule:
         name: f"Demux_{batch}"
         input:
-          read1 = f"/broad/hptmp/ruolin/{batch}_split_r1.{{ss}}.fastq",
-          read2 = f"/broad/hptmp/ruolin/{batch}_split_r2.{{ss}}.fastq",
+          read1 = f"/tmp/ruolin/{batch}_split_r1.{{ss}}.fastq",
+          read2 = f"/tmp/ruolin/{batch}_split_r2.{{ss}}.fastq",
           sample_sheet = batch_to_samplesheet.loc[batch]['sample_sheet']
         output:
           read1 = temp(expand("demux/%s_split.{{ss}}.{index}.1.fastq.gz" % batch, index = batch_to_samples.loc[batch]['sample'])),
@@ -212,7 +212,7 @@ rule SortBam:
     wildcard_constraints:
         index = "[0-9a-zA-Z_-]+"
     params:
-        temp = temp("/broad/hptmp/{batch_id}.{index}.raw.aligned.sortbyname")
+        temp = temp("/tmp/{batch_id}.{index}.raw.aligned.sortbyname")
     resources:
         mem = 8,
         runtime = 48,
