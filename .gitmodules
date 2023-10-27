@@ -1,12 +1,9 @@
 [submodule "bbcpputil/third_party/SeqLib"]
 	path = bbcpputil/third_party/SeqLib
-	url = git@github.com:ruolin/SeqLib.git
+	url = https://github.com:ruolin/SeqLib.git
 [submodule "bbcpputil/third_party/backward-cpp"]
 	path = bbcpputil/third_party/backward-cpp
 	url = https://github.com/bombela/backward-cpp
 [submodule "bbcpputil/third_party/seqan"]
 	path = bbcpputil/third_party/seqan
-	url = git@github.com:ruolin/seqan.git
-[submodule "bbcpputil/third_party/spoa"]
-	path = bbcpputil/third_party/spoa
-	url = git@github.com:rvaser/spoa.git
+	url = https://github.com:ruolin/seqan.git
