@@ -53,9 +53,6 @@ include_directories(${SEQLIB_ROOT}/htslib)
 link_directories(${SEQLIB_ROOT}/lib/)
 
 ## not currently used. But reserve for denovo consensus
-if (NOT TARGET spoa)
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/bbcpputil/third_party/spoa EXCLUDE_FROM_ALL)
-endif ()
 
 set(deps bbcpputil/cpp/AlignmentConsensus.cpp bbcpputil/cpp/BamRecordExt.cpp)
 set(subcommand demux.cpp trimadapter.cpp consensus.cpp accuracy.cpp)
@@ -81,7 +78,7 @@ if (CMAKE_BUILD_TYPE MATCHES Debug)
     #add_executable(codec codec.cpp ${subcommand} ${deps} ${BACKWARD_ENABLE})
     add_backward(codec)
 endif()
-target_link_libraries(codec ${CPP_LIBS} spoa)
+target_link_libraries(codec ${CPP_LIBS})
 
 ######## uncomment if you need to build CODEC_MSI 
 #add_executable(msi msi/msi.cpp ${deps})
