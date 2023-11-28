@@ -784,7 +784,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
                                           (int) var.alt_seq.size() - (int) var.contig_seq.size(),
                                           var.alt_seq.substr(1), false, opt.germline_var_maxdist,
                                           opt.germline_cutoff_vaf, 10, opt.germline_minbq, exact_match, fuzzy_match);
-          std::cerr << exact_match << ", " <<fuzzy_match << std::endl;
+          //std::cerr << exact_match << ", " <<fuzzy_match << std::endl;
           if (exact_match > 0 or fuzzy_match > 1) {
             ++errorstat.seen_in_germ;
             continue;

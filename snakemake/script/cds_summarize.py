@@ -71,17 +71,17 @@ def overlap_span_ratio(read1, read2):
 
 def get_arguments():
 
-    parser = argparse.ArgumentParser(prog="Parse Fastp json result(s)", formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--fastp", type=str, help="json file output by fastp", required=False)
+    parser = argparse.ArgumentParser(prog="CODEC byproducts summary", formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--highconf_bam", type=str, default = "", help="high confident CDS reads", required=True)
+    parser.add_argument("--sample_id", type=str, help="sample id", required=True)
     parser.add_argument("--trim_log", type=str, default = "", help="trim linker log file", required=False)
-    parser.add_argument("--highconf_bam", type=str, default = "", help="high confident CDS reads", required=False)
+    parser.add_argument("--fastp", type=str, help="json file output by fastp", required=False)
     parser.add_argument("--lowconf_bam", type=str, default = "", help="low confident CDS reads", required=False)
     parser.add_argument("--si_hiconf_bam", type=str, default = "", help="single insert highconf bam", required=False)
     parser.add_argument("--si_lowconf_bam", type=str, default = "", help="single insert lowconf bam", required=False)
     parser.add_argument("--trim_one_bam", type=str, default = "", help="Where linker has been trimmed from only one end", required=False)
     parser.add_argument("--untrim_both_bam", type=str, default = "", help="Where linker has not been trimmed from both ends", required=False)
     parser.add_argument("--hs_metrics", type=str, help="hs metrics output", default="")
-    parser.add_argument("--sample_id", type=str, help="sample id", required=True)
     parser.add_argument("--cds_intermol_bamout", type=str, help="output bam for cds intermolcular reads", default = "", required=False)
     parser.add_argument("--demux_log", type=str, help="demux log file", default = "", required=False)
     #parser.add_argument("--si_intermol_bamout", type=str, help="output bam for singleinsert intermolcular reads", required=True)
@@ -127,74 +127,41 @@ class CdsMetrics:
     def __str__(self):
         header = ["sample_id",
                   ### CDS specific
-                  "pct_cds_highconf",
-                  "pct_cds_lowconf",
-                  "pct_single_lowconf",
-                  "pct_single_highconf",
+                  "pct_correct",
                   "pct_double_ligation",
-                  "pct_insuf_trim",
                   "pct_adp_dimer",
                   "pct_intermol",
                   "pct_unmapped",
                   "pct_close_proxim",
                   "pct_categorized",
-                  "n_cds_highconf",
-                  "n_cds_lowconf",
-                  "n_single_lowconf",
-                  "n_single_highconf",
+                  "n_correct",
                   "n_double_ligation",
-                  "n_insuf_trim",
                   "n_adp_dimer",
                   "n_intermol",
                   "n_unmapped",
                   "n_close_proxim",
                   "n_categorized",
                   "n_total",
-                  #####
-                  "pct_aligned_frag",
-                  "on_target_rate",
-                  "mean_bait_cov",
-                  "mean_target_cov",
-                  "n_pass_fastp_filter",
-                  "pct_pass_fastp_filter",
-                  "pct_raw_uf_q20",
-                  "pct_raw_uf_q30",
                   ]
 
         header_str = "\t".join(header)
         return f"{header_str}\n" \
                f"{self.sample_id}\t" \
                f"{self.n_high_conf / self.n_raw_uf_frag()}\t" \
-               f"{self.n_low_conf / self.n_raw_uf_frag()}\t" \
-               f"{self.n_single_lowconf / self.n_raw_uf_frag()}\t" \
-               f"{self.n_single_hiconf / self.n_raw_uf_frag()}\t" \
                f"{self.n_double_ligation / self.n_raw_uf_frag()}\t" \
-               f"{self.n_insuf_trim / self.n_raw_uf_frag()}\t" \
                f"{self.n_adp_dimer_frag / self.n_raw_uf_frag()}\t" \
                f"{self.n_intermol / self.n_raw_uf_frag()}\t" \
                f"{self.n_unmapped / self.n_raw_uf_frag()}\t" \
                f"{self.n_close_proxim / self.n_raw_uf_frag()}\t" \
                f"{self.n_categorized() / self.n_raw_uf_frag()}\t" \
                f"{self.n_high_conf}\t" \
-               f"{self.n_low_conf}\t" \
-               f"{self.n_single_lowconf}\t" \
-               f"{self.n_single_hiconf}\t" \
                f"{self.n_double_ligation}\t" \
-               f"{self.n_insuf_trim}\t" \
                f"{self.n_adp_dimer_frag}\t" \
                f"{self.n_intermol}\t" \
                f"{self.n_unmapped}\t" \
                f"{self.n_close_proxim}\t" \
                f"{self.n_categorized()}\t" \
-               f"{self.n_raw_frag}\t" \
-               f"{self.pct_aligned_frag}\t" \
-               f"{self.on_target_rate}\t" \
-               f"{self.mean_bait_cov}\t" \
-               f"{self.mean_target_cov}\t" \
-               f"{self.n_raw_pf_frag}\t" \
-               f"{self.n_raw_pf_frag / self.n_raw_frag}\t" \
-               f"{self.pct_raw_uf_q20}\t" \
-               f"{self.pct_raw_uf_q30}"
+               f"{self.n_raw_frag}"
 
 def parse_linker_trim_log(log_file, cdsm, adap_v2):
     with open(log_file, 'r') as f:
@@ -240,20 +207,20 @@ def alignment_analysis(bam, cdsm, trim_type, intermol_bam = None, im_dist_cutoff
             else:
                 if is_complete_overlapped_excluding_sclips(read1, read2):
                     cdsm.n_high_conf += 1
-        elif trim_type == "LowConf":
-            if is_complete_overlapped_excluding_sclips(read1, read2):
-                cdsm.n_low_conf += 1
-        elif trim_type == "SingleHiconf":
-            if (not read1.has_tag('tm') or read1.get_tag('tm') != 4 ) and \
-                    (not read2.has_tag('tm') or read2.get_tag('tm') != 4 ) and \
-                    is_complete_overlapped_excluding_sclips(read1, read2):
-                    cdsm.n_single_hiconf += 1
-        elif trim_type == "SingleLowconf":
-            if is_complete_overlapped_excluding_sclips(read1, read2):
-                cdsm.n_single_lowconf += 1
-        elif trim_type == "TrimOne" or trim_type == "UntrimBoth":
-            if not adap_v2 and is_overlapped(read1, read2):
-                cdsm.n_insuf_trim += 1
+        # elif trim_type == "LowConf":
+        #     if is_complete_overlapped_excluding_sclips(read1, read2):
+        #         cdsm.n_low_conf += 1
+        # elif trim_type == "SingleHiconf":
+        #     if (not read1.has_tag('tm') or read1.get_tag('tm') != 4 ) and \
+        #             (not read2.has_tag('tm') or read2.get_tag('tm') != 4 ) and \
+        #             is_complete_overlapped_excluding_sclips(read1, read2):
+        #             cdsm.n_single_hiconf += 1
+        # elif trim_type == "SingleLowconf":
+        #     if is_complete_overlapped_excluding_sclips(read1, read2):
+        #         cdsm.n_single_lowconf += 1
+        # elif trim_type == "TrimOne" or trim_type == "UntrimBoth":
+        #     if not adap_v2 and is_overlapped(read1, read2):
+        #         cdsm.n_insuf_trim += 1
 
     return total_frag
 
@@ -278,11 +245,17 @@ def process(opts):
         adap_v2 = True if num_frag_processed == 0 else False
     else:
         adap_v2 = True
+
+    if opts.trim_log:
+        parse_linker_trim_log(opts.trim_log, cdsm, adap_v2)
+
     if opts.highconf_bam:
         if opts.cds_intermol_bamout:
-            alignment_analysis(opts.highconf_bam, cdsm, trim_type = 'HighConf', intermol_bam=cds_intermol_writer, adap_v2=adap_v2)
+            nread_processed = alignment_analysis(opts.highconf_bam, cdsm, trim_type = 'HighConf', intermol_bam=cds_intermol_writer, adap_v2=adap_v2)
         else:
-            alignment_analysis(opts.highconf_bam, cdsm, trim_type='HighConf', adap_v2=adap_v2)
+            nread_processed =alignment_analysis(opts.highconf_bam, cdsm, trim_type='HighConf', adap_v2=adap_v2)
+    if cdsm.n_raw_frag == 0:
+        cdsm.n_raw_frag = nread_processed
     if opts.trim_one_bam:
         alignment_analysis(opts.trim_one_bam, cdsm, trim_type = 'TrimOne')
     if opts.untrim_both_bam:
@@ -292,8 +265,6 @@ def process(opts):
     if opts.si_lowconf_bam:
         alignment_analysis(opts.si_lowconf_bam, cdsm, trim_type = 'SingleLowconf')
 
-    if opts.trim_log:
-        parse_linker_trim_log(opts.trim_log, cdsm, adap_v2)
 
     if opts.hs_metrics:
         hs_metrics_df = pd.read_csv(opts.hs_metrics, skiprows=6, nrows=1, sep='\t', low_memory=False)
