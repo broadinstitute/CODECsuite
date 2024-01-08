@@ -107,7 +107,7 @@ class IndexBarcode {
     std::getline(file_, header);
     auto colnames = cpputil::split(header, ",");
     if (colnames.size() != 3 || colnames[0] != "SampleName" || colnames[1] != "IndexBarcode1" || colnames[2] != "IndexBarcode2") {
-      throw std::runtime_error("Invalid index file\n Format required as three tab-delimited columns with header SampleName\tIndexBarcode1\tIndexBarcode2");
+      throw std::runtime_error("Invalid index file\n Format required as three comma-delimited columns with header SampleName,IndexBarcode1,IndexBarcode2");
     }
     if (out_unmatched) {
       unkfq1_writer_.open(outprefix + ".unmatched.1.fastq.gz");
