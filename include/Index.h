@@ -18,14 +18,35 @@
 #include "StringUtils.h"
 #include "FastxIO.h"
 #include "Gotoh.h"
+#include "omp.h"
 
 namespace CDS {
-int SSW(const std::string &ref, const std::string &query) {
-  StripedSmithWaterman::Aligner aligner;
+static void PrintAlignment(const StripedSmithWaterman::Alignment& alignment){
+  std::cout << "===== SSW result =====" << std::endl;
+  std::cout << "Best Smith-Waterman score:\t" << alignment.sw_score << std::endl
+       << "Next-best Smith-Waterman score:\t" << alignment.sw_score_next_best << std::endl
+       << "Reference start:\t" << alignment.ref_begin << std::endl
+       << "Reference end:\t" << alignment.ref_end << std::endl
+       << "Query start:\t" << alignment.query_begin << std::endl
+       << "Query end:\t" << alignment.query_end << std::endl
+       << "Next-best reference end:\t" << alignment.ref_end_next_best << std::endl
+       << "Number of mismatches:\t" << alignment.mismatches << std::endl
+       << "Cigar: " << alignment.cigar_string << std::endl;
+  std::cout << "======================" << std::endl;
+}
+int SSW(const std::string &ref, const std::string &query, bool verbose=false) {
+  StripedSmithWaterman::Aligner aligner(2,0,2,1);
+  //StripedSmithWaterman::Aligner aligner;
+
   StripedSmithWaterman::Filter filter;
   StripedSmithWaterman::Alignment alignment;
   aligner.Align(query.c_str(), ref.c_str(), ref.size(), filter, &alignment, 15);
-  return alignment.mismatches + alignment.query_begin + query.length() - alignment.query_end;
+  int ed = alignment.mismatches + alignment.query_begin + query.length() - alignment.query_end - 1;
+  if (verbose) {
+    PrintAlignment(alignment);
+    std::cout << "edit: " << ed << std::endl;
+  }
+  return ed;
 }
 
 
@@ -76,10 +97,10 @@ class IndexBarcode {
     int second_lowest_nm = std::numeric_limits<int>::max();
     int best_idx = 0;
     for (unsigned i  = 0; i < indexes.size(); ++i) {
-      //int s = SSW(seq, indexes[i]);
-      AffineGap ag(seq, indexes[i]);
-      Alignment align(seq, indexes[i], ag.Path());
-      int s = align.NM();
+      int s = SSW(seq, indexes[i]);
+      //AffineGap ag(seq, indexes[i]);
+      //Alignment align(seq, indexes[i], ag.Path());
+      //int s = align.NM();
       if (s < lowest_nm) {
         second_lowest_nm = lowest_nm;
         lowest_nm = s;
@@ -164,8 +185,8 @@ class IndexBarcode {
 
   void DecodePair(const cpputil::FastxRecord& r1, const cpputil::FastxRecord& r2, int index_begin, int index_len) {
     std::string ob1, qual1, ob2, qual2;
-    std::tie(ob1, qual1) = ExtractIndex(r1, index_begin, index_len);
-    std::tie(ob2, qual2) = ExtractIndex(r2, index_begin, index_len);
+    std::tie(ob1, qual1) = ExtractIndex(r1, std::max(index_begin-2, 0), index_len+2);
+    std::tie(ob2, qual2) = ExtractIndex(r2, std::max(index_begin-2, 0), index_len+2);
     int nm1, nm2;
     int idx1 = MatchIndex(ob1, qual1, index1s_, nm1);
     int idx2 = MatchIndex(ob2, qual2, index2s_, nm2);

@@ -340,7 +340,7 @@ static int ScanIndel(PileHandler *input,
     }
     if ((depth >= mindepth && max > 0 && maxbase != refbase[0] && max > d * germ_min_vaf) ||
       (depth >= mindepth && secmax > 0 && secmaxbase != refbase[0] && secmax > d * germ_min_vaf)) {
-      std::cerr << search << std::endl;
+    //  std::cerr << search << std::endl;
       fuzzy_match = 2;
       bam_mplp_destroy(mplp);
       return depth;
