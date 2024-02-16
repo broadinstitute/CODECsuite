@@ -38,6 +38,9 @@ struct FastxRecord {
   FastxRecord() = default;
   FastxRecord(std::string i, std::string s, std::string q) : id(i), seq(s), qual(q) {
     name_idx = id.find(' ');
+    if (name_idx == std::string::npos) {
+      name_idx = id.find('/');
+    }
   };
 
   FastxRecord(const SeqLib::BamRecord &br, bool duplex_umi = false) {
