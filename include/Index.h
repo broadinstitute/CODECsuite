@@ -141,7 +141,8 @@ class IndexBarcode {
     std::set<std::string> unique_sids;
     while(std::getline(file_, line)) {
       std::cerr << line << std::endl;
-      auto fields = cpputil::split(line, ",");
+      std::vector<std::string> fields;
+      cpputil::split_by_char(line, ',', fields);
       if (unique_sids.find(fields[0]) == unique_sids.end()) {
         unique_sids.insert(fields[0]);
         snames_.push_back(fields[0]);

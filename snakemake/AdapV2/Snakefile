@@ -201,7 +201,7 @@ rule MergeLogSplit:
           ncores = 1
     shell:
          """
-          {AGG_LOG_SCRIPT} {input} {output}
+          python {AGG_LOG_SCRIPT} {input} {output}
          """
 
 rule SortBam:
