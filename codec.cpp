@@ -8,12 +8,12 @@
 #include <getopt.h>
 #include <cassert>
 #ifndef PACKAGE_VERSION
-#define PACKAGE_VERSION "1.1.0"
+#define PACKAGE_VERSION "1.1.1"
 #endif
 
 int codec_demux(int argc, char **argv);
 int codec_trim(int argc, char **argv);
-int codec_consensus(int argc, char **argv);
+int codec_filter(int argc, char **argv);
 int codec_accuracy(int argc, char **argv);
 //int codec_filter(int argc, char ** argv);
 
@@ -29,7 +29,7 @@ int print_help()
   std::cout<< "                     call                       single fragment mutation caller.\n";
   std::cout<< "---------------------------------------------------\n";
   std::cout<< "Optional command:\n";
-  std::cout<< "                     consensus                  merging overlapping paired ends.\n";
+  std::cout<< "                     filter                     Filter duplex reads on base and fragment levels.\n";
   std::cout<< "---------------------------------------------------\n";
   std::cout<< "Contact: ruolin@broadinstitute.org. "
               "Copyright: bloodbiopsy@broadinstitute.org 2020-2021. \n";
@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
   if (argc < 2) return print_help();
   else if (strcmp(argv[1], "demux") == 0) ret = codec_demux(argc-1, argv+1);
   else if (strcmp(argv[1], "trim") == 0) ret = codec_trim(argc-1, argv+1);
-  else if (strcmp(argv[1], "consensus") == 0) ret = codec_consensus(argc-1, argv+1);
+  else if (strcmp(argv[1], "filter") == 0) ret = codec_filter(argc-1, argv+1);
   else if (strcmp(argv[1], "call") == 0) ret = codec_accuracy(argc-1, argv+1);
 //  else if (strcmp(argv[1], "filter") == 0) ret = codec_filter(argc-1, argv+1);
   else {

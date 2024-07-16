@@ -158,7 +158,7 @@ static struct option  accuracy_long_options[] = {
     {"min_indel_anchor_baseq",   required_argument,      0,        'f'},
     {"min_indel_dist_readend",   required_argument,      0,        'E'},
     {"germline_cutoff_vaf",      required_argument,      0,        'i'},
-    {"disable_5endclip_filtering",    no_argument,            0,        '5'},
+    {"filter_5endclip",    no_argument,            0,        '5'},
     {"allow_indel_near_snv",     no_argument,            0,        OPT_ALLOW_INDEL_NEAR_SNV},
     {"min_indel_len",            required_argument,            0,        'I'},
     {"min_passQ_frac",           required_argument,      0,        'Q'},
@@ -233,10 +233,10 @@ void accuracy_print_help()
   std::cerr<< "-f/--min_indel_anchor_baseq,           minimum baseq for the anchoring bases of a indel [20].\n";
   std::cerr<< "-E/--min_indel_dist_readend            minimum distant of a INDEL to the end of a read [3].\n";
   std::cerr<< "--allow_indel_near_snv,                allow SNV to pass filter if a indel is found in the same read [false].\n";
+  std::cerr<< "-G/--max_fraglen,                      Filter out a read if its fragment length is larger than this value [INT_MAX].\n";
   std::cerr<< "-g/--min_fraglen,                      Filter out a read if its fragment length is less than this value [30].\n";
   std::cerr<< "-B/--max_frac_prim_AS,                 Filter out a read if the AS of the secondary alignment is >= this fraction times the AS of the primary alignment [FLOAT_MAX].\n";
   std::cerr<< "-Y/--min_germdepth,                    Minimum depth in germline bam [5].\n";
-  std::cerr<< "-G/--max_fraglen,                      Filter out a read if its fragment length is larger than this value [INT_MAX].\n";
   //std::cerr<< "-p/--pair_min_overlap,                 When using selector, the minimum overlap between the two ends of the pair. -1 for complete overlap, 0 no overlap required [0].\n";
   std::cerr<< "-c/--clustered_mut_cutoff,             Filter out a read if at least this number of mutations occur in a window of 30 bp near the read end (<15 bp). [INT_MAX].\n";
   std::cerr<< "--min_dist_to_nearest_SNV,             The indel of interest is at least x nt from another SNV. [x = 4].\n";

@@ -77,7 +77,7 @@ struct ErrorStat {
     qcut_nerrors[q] = std::make_pair(0,0);
     Init(L);
   }
-  ErrorStat(const vector<int>& qcuts, int L): cutoffs(qcuts){
+  ErrorStat(const std::vector<int>& qcuts, int L): cutoffs(qcuts){
     assert(std::find(qcuts.begin(), qcuts.end(), 0) != qcuts.end());
     //assert(std::find(qcuts.begin(), qcuts.end(), 30) != qcuts.end());
     for (auto q : qcuts) {
@@ -100,7 +100,7 @@ struct ErrorStat {
   }
 };
 
-std::pair<int,int> CountValidBaseInMatchedBases(const SeqLib::BamRecord &b,
+inline std::pair<int,int> CountValidBaseInMatchedBases(const SeqLib::BamRecord &b,
                                                 const std::set<int>& site_blacklist,
                                                 const int minbq,
                                                 std::set<int>& bq_blacklist,
@@ -165,7 +165,7 @@ std::pair<int,int> CountValidBaseInMatchedBases(const SeqLib::BamRecord &b,
   return std::make_pair(res, q0res);
 }
 
-std::pair<int, int> CountValidBaseAndContextInMatchedBases(const SeqLib::BamRecord &b,
+inline std::pair<int, int> CountValidBaseAndContextInMatchedBases(const SeqLib::BamRecord &b,
                                                            const std::set<int>& site_blacklist,
                                                            const std::string chrname,
                                                            const SeqLib::RefGenome& refgenome,
@@ -272,7 +272,7 @@ static int NumHighBQ(const SeqLib::BamRecord& b, const int cutoff) {
 static std::pair<int,int> CountDenom(const cpputil::Segments& seg,
                               const SeqLib::GenomicRegion* const gr,
                               const SeqLib::RefGenome& ref,
-                              const string& chrname,
+                              const std::string& chrname,
                               const std::set<int>& blacklist,
                               cpputil::ErrorStat& es,
                               int minbq,
@@ -412,7 +412,7 @@ static std::pair<int,int> CountDenom(const cpputil::Segments& seg,
   return std::make_pair(r1, r2);
 }
 
-std::tuple<int,int, int> NumMisMatchOrLowQualityInOverlapRegion(const cpputil::Segments& seg, uint8_t minbq) {
+inline std::tuple<int,int, int> NumMisMatchOrLowQualityInOverlapRegion(const cpputil::Segments& seg, uint8_t minbq) {
   int nmis = 0, nlowbaseq=0, noverlap = 0;
   std::vector<std::string> dna_pileup, qual_pileup;
   std::tie(dna_pileup, qual_pileup) = GetPairPileup(seg);
@@ -429,7 +429,7 @@ std::tuple<int,int, int> NumMisMatchOrLowQualityInOverlapRegion(const cpputil::S
   return std::make_tuple(nmis, nlowbaseq, noverlap);
 }
 
-std::pair<int,int> NumEffectBases(const cpputil::Segments& seg, int minbq, bool count_overhang, bool N_is_valid) {
+inline std::pair<int,int> NumEffectBases(const cpputil::Segments& seg, int minbq, bool count_overhang, bool N_is_valid) {
   // blacklist represents a set of SNV positions that will not be counted in the error rate calculation
   int r1 = 0, r2 = 0, r1q0 = 0, r2q0 = 0;
   std::set<int> baseqblack;
@@ -477,7 +477,7 @@ std::pair<int,int> NumEffectBases(const cpputil::Segments& seg, int minbq, bool 
   return std::make_pair(r1, r2);
 }
 
-bool HasBadCigar(const SeqLib::BamRecord& rec) {
+inline bool HasBadCigar(const SeqLib::BamRecord& rec) {
   //If Indel is next to soft clipping
   const auto cigar = rec.GetCigar();
   auto s = cigar.size();
@@ -492,7 +492,7 @@ bool HasBadCigar(const SeqLib::BamRecord& rec) {
 }
 
 template<typename Options>
-int FailFilter(const vector<cpputil::Segments>& frag,
+int FailFilter(const std::vector<cpputil::Segments>& frag,
                const SeqLib::BamHeader& bamheader,
                const SeqLib::RefGenome& ref,
                const Options& opt,
