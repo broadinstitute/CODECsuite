@@ -41,7 +41,7 @@ class InsertSeqFactory {
   bool clip3_ = false;
   int last_chr_;
   bool finished_ = false;
-  int paired_end_library_ = -1; // 0 single end, 1 paired end
+  int paired_end_library_ = 1; // 0 single end, 1 paired end
 
   bool passfilter(const SeqLib::BamRecord& b) {
     if (!b.MappedFlag()) return false;
@@ -140,13 +140,6 @@ class InsertSeqFactory {
       last_chr_(-1) {
     bam_reader_.Open(bam);
     SeqLib::BamRecord b;
-    auto ret = bam_reader_.GetNextRecord(b);
-    if (b.PairedFlag()) paired_end_library_ = 1;
-    else paired_end_library_ = 0;
-    if (clip3_) {
-      cpputil::SoftClip3end(b);
-    }
-    id_inserts_.emplace(b.Qname(), b);
   };
 
   bool IsPairEndLib() const {
@@ -189,30 +182,25 @@ class InsertSeqFactory {
       if (clip3_) {
         cpputil::SoftClip3end(b);
       }
-      if (!id_inserts_.empty()) {
-        auto itfind = id_inserts_.find(b.Qname());
-        if (itfind == id_inserts_.end()) {
-          for(auto it  : id_inserts_) {
-            it.second.Mate();
-            for (auto seg: it.second.paired()) {
-              ret.push_back(seg);
-            }
-            if (load_unpair) {
-              for (auto bam: it.second.inprogress()) {
-                Segments tmp(1, bam);
-                ret.push_back(tmp);
-              }
+      auto itfind = id_inserts_.find(b.Qname());
+      if (itfind == id_inserts_.end()) {
+        for(auto it  : id_inserts_) {
+          it.second.Mate();
+          for (auto seg: it.second.paired()) {
+            ret.push_back(seg);
+          }
+          if (load_unpair) {
+            for (auto bam: it.second.inprogress()) {
+              Segments tmp(1, bam);
+              ret.push_back(tmp);
             }
           }
-          id_inserts_.clear();
-          id_inserts_.emplace(b.Qname(), b);
-          return ret;
-        } else {
-          itfind->second.add(b);
         }
-      } else {
-        throw std::runtime_error("loading error");
+        id_inserts_.clear();
         id_inserts_.emplace(b.Qname(), b);
+        return ret;
+      } else {
+        itfind->second.add(b);
       }
     }
     if (!id_inserts_.empty()) {

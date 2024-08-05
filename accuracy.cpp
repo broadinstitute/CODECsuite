@@ -602,7 +602,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
     if (opt.count_read) {
       errorstat.neval += r1_den + r2_den;
     } else {
-      errorstat.neval += r1_den;
+      errorstat.neval += r2_den;
     }
     errorstat.qcut_neval[0].first += q0den.first;
     errorstat.qcut_neval[0].second += q0den.second;
