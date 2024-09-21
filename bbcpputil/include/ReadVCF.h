@@ -255,9 +255,9 @@ class BCFReader {
             int allele_index = bcf_gt_allele(gt[j]);
             if (allele_index == 0) continue;
             if (allele_index < 0 or allele_index >= rec->n_allele) {
-              std::cerr << "Error: allele index not exist " << rec->rid << "\t" << rec->pos
+              std::cerr << "Error: allele index not exist " << allele_index <<", chrom, pos " << rec->rid << "\t" << rec->pos
                         << "\n";
-              exit(0);
+              continue;
             }
             int t = bcf_get_variant_type(rec, allele_index);
             if (allele.empty() && (t == VCF_MNP || t == VCF_SNP) && pos == rec->pos) {
