@@ -1143,7 +1143,7 @@ int codec_accuracy(int argc, char ** argv) {
   if (not opt.known_var_out.empty()) {
     known.open(opt.known_var_out);
     string known_var_header =
-        "chrom\tref_pos\tref\talt\ttype\tread_pos\tsnv_base_qual\tfirst_of_pair\tread_name\tevidence";
+        "chrom\tref_pos\tref\talt\ttype\tread_pos\tsnv_base_qual\tfirst_of_pair\tread_name\tfamily_size\tevidence";
     known << known_var_header << std::endl;
   }
   if (not opt.read_level_stat.empty()) {
