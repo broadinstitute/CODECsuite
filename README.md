@@ -1,3 +1,13 @@
+UPDATES
+
+*  (01/08/25) Version 1.1.4 introduces a new script `codec filter` designed to filter consensus BAM files. It retains only the reads and bases relevant for variant calling. Fragments (read-pairs) that do not pass fragment-level filtering are excluded from the output BAM. Bases that fail the filters are assigned a minimum base quality score (Q2), ensuring they are ignored by most coverage analysis and variant calling tools.
+   It can be run as the following:
+   
+   ``` codec filter -b mol_consensus.sorbybyname.bam -o duplex_only.bam -r reference.fa -q 30 -m 60 -Q 0.7 -B 0.5 -N 0.05 ...```
+> [!NOTE]
+> The input BAM file must be sorted by read name, and the output BAM will also be query-name sorted. For consistent filtering results, it is recommended to use the same parameters as those in codec call.
+
+
 # CODECsuite
 CODECsuite is the software to process the CODEC data. It has 3 core functions: demultiplexing, adapter trimming, and single fragment mutation calling (SFC), which are written in c++14. 
 
