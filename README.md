@@ -9,8 +9,7 @@ UPDATES
 
 
 # CODECsuite
-CODECsuite is the software to process the CODEC data. It has 3 core functions: demultiplexing, adapter trimming, and single fragment mutation calling (SFC), which are written in c++14. 
-
+The CODEC analysis pipeline, CODECsuite, comprises five key steps: demultiplexing, adapter trimming, alignment, duplicate collapsing, and single-fragment mutation calling. Duplicate collapsing and alignments are performed using the third-party tools Fgbio and BWA, respectively. After removing byproducts and applying fragment-level filtering, mutations were identified exclusively from duplexes in the overlapped regions, where bases from each read align and match. Bases within these regions underwent stringent filtering based on criteria such as base quality, proximity to fragment ends, overlap with germline mutations, and other factors. Notably, a single read pair is sufficient to form a duplex, as each read represents one strand. 
 ## Installation
 Tested on Red Hat 7 and Ubuntu 18.04
 
