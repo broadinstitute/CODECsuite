@@ -42,9 +42,8 @@ struct CssOptions {
   string bam;
   string reference;
   int mapq = 10;
-  bool output_nononverlapping_pair = false;
+//  bool output_nononverlapping_pair = false;
   bool clip3 = false;
-  int consensus_mode = 0;
 //  int pair_min_overlap = 1;
   bool trim_overhang = false;
   string tmpdir = "/tmp";
@@ -85,7 +84,7 @@ static struct option  filter_long_options[] = {
     {"outbam",                   required_argument ,     0,        'o'},
 //    {"pair_min_overlap",         required_argument,      0,        'p'},
     {"trim_overhang",            no_argument,            0,        't'},
-    {"output_nononverlapping_pair",no_argument,            0,        'i'},
+//    {"output_nononverlapping_pair",no_argument,            0,        'i'},
 
     {"min_fraglen",              required_argument,      0,        'g'},
     {"max_fraglen",              required_argument,      0,        'G'},
@@ -97,32 +96,31 @@ static struct option  filter_long_options[] = {
     {"clustered_mut_cutoff",     required_argument,      0,        'c'},
     {"filter_5endclip",          no_argument,            0,        '5'},
 
-    {"consensus_mode",           required_argument ,     0,        'M'},
-    {"dirtmp",                   required_argument ,     0,        'd'},
-    {"thread",                   required_argument,      0,        'T'},
+//    {"dirtmp",                   required_argument ,     0,        'd'},
+//    {"thread",                   required_argument,      0,        'T'},
     {0,0,0,0}
 };
 
-const char* filter_short_options = "b:m:M:o:lCq:d:tT:ig:G:B:Q:y:x:c:5r:N:";
+const char* filter_short_options = "b:m:o:lCq:tg:G:B:Q:y:x:c:5r:N:";
 
 void filter_print_help()
 {
   std::cerr<< "---------------------------------------------------\n";
-  std::cerr<< "Usage: codec filter [options]\n";
+  std::cerr<< "Description: A standalone program designed for fragment-level and base-level filtering used in the 'codec call' process.\n";
+  std::cerr<< "This can remove non-duplex and low quality reads and bases.\n";
+  std::cerr<< "Usage: codec filter [options].\n";
   std::cerr<< "General Options:\n";
-  std::cerr<< "-b/--bam,                              Input bam [required]\n";
-  std::cerr<< "-r/--reference,                        reference sequence in fasta format [null].\n";
-  std::cerr<< "-o/--outbam,                           Output unmapped bamfile [required].\n";
+  std::cerr<< "-b/--bam,                              Input bam in query-name sorted order [required]\n";
+  std::cerr<< "-o/--outbam,                           Output bam in query-name sorted order [required].\n";
+  std::cerr<< "-r/--reference,                        Reference genome [required].\n";
   std::cerr<< "-m/--mapq,                             Min mapping quality [10].\n";
   std::cerr<< "-q/--baseq,                            If one of the baseq < cutoff, make all baseq = 2 so that VC will ingnore them. [0].\n";
-  std::cerr<< "-t/--trim_overhang,                    When perform paired-end consensus, if true then only do consensus of the overlapped region [false].\n";
-  std::cerr<< "-C/--clip3,                            trim the 3'end soft clipping [false].\n";
+  std::cerr<< "-t/--trim_overhang,                    Remove overhang regions (where R1 and R2 do not overlap) in the output reads. [false].\n";
+  std::cerr<< "-C/--clip3,                            trim the 3'end soft clipping. [false].\n";
 //  std::cerr<< "-s/--output_singleend,                 The R1R2 consensus will be output in a single end format [false].\n";
 //  std::cerr<< "-p/--pair_min_overlap,                 When using selector, the minimum overlap between the two ends of the pair [1].\n";
-  std::cerr<< "-d/--dirtmp,                           Temporary dir for sorted bam [/tmp]\n";
-  std::cerr<< "-T/--thread,                           Number of threads for sort [1]\n";
-  std::cerr<< "-i/--output_nononverlapping_pair,        Allow output of non-overlaping pairs, usually caused by intermolecular ligation. This will simply print the original reads.  [false]\n";
-
+//  std::cerr<< "-d/--dirtmp,                           Temporary dir for sorted bam [/tmp]\n";
+//  std::cerr<< "-T/--thread,                           Number of threads for sort [1]\n";
   std::cerr<<"filtering options\n";
   std::cerr<< "-G/--max_fraglen,                      Filter out a read if its fragment length is larger than this value [INT_MAX].\n";
   std::cerr<< "-g/--min_fraglen,                      Filter out a read if its fragment length is less than this value [30].\n";
@@ -164,24 +162,15 @@ int filter_parse_options(int argc, char* argv[], CssOptions& opt) {
       case 't':
         opt.trim_overhang = true;
         break;
-      case 'i':
-        opt.output_nononverlapping_pair = true;
-        break;
+//      case 'i':
+//        opt.output_nononverlapping_pair = true;
+//        break;
       case 'C':
         opt.clip3 = true;
         break;
-//      case 's':
-//        opt.output_singleend = true;
-//        break;
       case 'd':
         opt.tmpdir = optarg;
         break;
-      case 'M':
-        opt.consensus_mode = atoi(optarg);
-        break;
-//      case 'p':
-//        opt.pair_min_overlap = atoi(optarg);
-//        break;
       case 'T':
         opt.thread = atoi(optarg);
         break;
@@ -239,85 +228,83 @@ int codec_filter(int argc, char ** argv) {
     filter_print_help();
     return 1;
   }
-//  if (opt.output_nononverlapping_pair) {
-//    if (opt.pair_min_overlap != 0) {
-//      std::cerr << "-p/--pair_min_overlap has to be 0 if -i/--output_nononverlapping_pair is true\n";
-//      return 1;
-//    }
-//  }
 
-  char temp[100];
-  strcpy(temp, opt.tmpdir.c_str());
-  strcat(temp, "/tempsort.XXXXXX");
-  int fd = mkstemp(temp);
-  if (fd == -1) {
-    std::cerr << "unable to create temp file for sorting bam in queryname order\n";
-    return 1;
-  }
-  string samsort = "samtools sort -n " + opt.bam + " -o " + string(temp) + " -@ " + std::to_string(opt.thread);
-  std::cout << "sorting bam: " << samsort << std::endl;
-  std::system(samsort.c_str());
-  std::cout << "sorting done" << std::endl;
+  //char temp[100];
+  //strcpy(temp, opt.tmpdir.c_str());
+  //strcat(temp, "/tempsort.XXXXXX");
+  //int fd = mkstemp(temp);
+  //if (fd == -1) {
+  //  std::cerr << "unable to create temp file for sorting bam in queryname order\n";
+  //  return 1;
+  //}
+  //string samsort = "samtools sort -n " + opt.bam + " -o " + string(temp) + " -@ " + std::to_string(opt.thread);
+  //std::cout << "sorting bam: " << samsort << std::endl;
+  //std::system(samsort.c_str());
+  //std::cout << "sorting done" << std::endl;
 
   SeqLib::RefGenome ref;
   ref.LoadIndex(opt.reference);
   const int L = 250;
   auto errorstat = cpputil::ErrorStat(L, opt.bqual_min);
-  cpputil::InsertSeqFactory isf(temp,
+  cpputil::InsertSeqFactory isf(opt.bam,
                                 0,
                                 opt.load_supplementary,
                                 opt.load_secondary,
                                 false,
                                 !opt.load_unpair,
                                 opt.clip3);
-  cpputil::UnMappedBamWriter writer(opt.outbam, isf.bamheader());
+  //cpputil::UnMappedBamWriter writer(opt.outbam, isf.bamheader());
+  SeqLib::BamWriter bamwriter;
+  bamwriter.Open(opt.outbam);
+  bamwriter.SetHeader(isf.bamheader());
+  bamwriter.WriteHeader();
   int64_t read_counter = 0;
   int64_t duplex_counter = 0;
   int64_t pass_counter = 0;
-  if (opt.consensus_mode == 0) {
-    while (!isf.finished()) {
-      std::vector<cpputil::Segments> frag;
-      while( (frag= isf.FetchReadNameSorted(opt.load_unpair)).size() > 0) {
-        for (auto seg : frag) {
-          assert (seg.size() == 2);
-          ++ read_counter;
-          int ol = cpputil::GetNumOverlapBasesPEAlignment(seg);
-          if (ol > 0) {
-            ++ duplex_counter;
-            std::vector<std::string> orig_quals; // consensus output
-            std::vector<std::string> seqs;
-            for (auto&s : seg) {
-              seqs.push_back(s.Sequence());
-            }
-            int pair_nmismatch = 0, olen = 0;
-            float nqpass;
-            int fail = cpputil::FailFilter(frag, isf.bamheader(), ref, opt, errorstat, true, pair_nmismatch, nqpass, olen);
-            if (fail) {
-              continue;
-            }
-            ++ pass_counter;
-            auto seq = cpputil::PairConsensus(seg, seqs, opt.trim_overhang, opt.bqual_min, orig_quals); // trim overhang if true
-            if (seg.front().FirstFlag()) {
-              writer.WriteRecord(seg.front(), seg.back(), seq.first, seq.second, orig_quals.front(), orig_quals.back());
-            }
-            else if (seg.back().FirstFlag()) {
-              writer.WriteRecord(seg.back(), seg.front(), seq.second, seq.first, orig_quals.back(), orig_quals.front());
-            }
-          } else if (opt.output_nononverlapping_pair) {
-            writer.WriteRecord(seg.front(), seg.back());
+  while (!isf.finished()) {
+    std::vector<cpputil::Segments> frag;
+    while( (frag= isf.FetchReadNameSorted(opt.load_unpair)).size() > 0) {
+      for (auto seg : frag) {
+        assert (seg.size() == 2);
+        ++ read_counter;
+        int ol = cpputil::GetNumOverlapBasesPEAlignment(seg);
+        if (ol > 0) {
+          ++duplex_counter;
+          std::vector<std::string> orig_quals; // consensus output
+          std::vector<std::string> seqs;
+          for (auto &s: seg) {
+            seqs.push_back(s.Sequence());
           }
+          int pair_nmismatch = 0, olen = 0;
+          float nqpass;
+          int fail = cpputil::FailFilter(frag, isf.bamheader(), ref, opt, errorstat, true, pair_nmismatch, nqpass,
+                                         olen);
+          if (fail) {
+            continue;
+          }
+          ++pass_counter;
+          auto seq = cpputil::PairConsensus(seg, seqs, opt.trim_overhang, opt.bqual_min,
+                                            orig_quals); // trim overhang if true
+          //if (seg.front().FirstFlag()) {
+          seg.front().SetSequence(seq.first);
+          seg.front().SetQualities(orig_quals.front(), 33);
+          seg.back().SetSequence(seq.second);
+          seg.back().SetQualities(orig_quals.back(), 33);
+          //writer.WriteRecord(seg.front(), seg.back(), seq.first, seq.second, orig_quals.front(), orig_quals.back());
+          //}
+          //else if (seg.back().FirstFlag()) {
+          //writer.WriteRecord(seg.back(), seg.front(), seq.second, seq.first, orig_quals.back(), orig_quals.front());
+          //}
+          bamwriter.WriteRecord(seg.front());
+          bamwriter.WriteRecord(seg.back());
         }
       }
     }
-  } else if (opt.consensus_mode == -1) { // dummy code for denovo consensus
-    std::cerr << "denovo consensus yet to be build\n"; 
-  } else {
-    std::cerr << "Consensus mode should be either 0 or 1\n";
-    return 1;
   }
-  std::cout << "total molecule" << "\t" << "duplex molecule" << "\t" << "pass filter duplex" << "\t" << "filtered by mapq" \
-            <<  "\t" << "filtered by pairmismatch rate"  << "\t" << "filtered by q30 rate" << "\t" << "filtered by edit" \
-            << "\t" << "filtered by clustered" << "\t" << "filtered by sclip" << "\t" << "filtered by largefrag" << std::endl;
+  bamwriter.Close();
+  std::cout << "total_molecules" << "\t" << "duplex_molecules" << "\t" << "pass_filter_duplexes" << "\t" << "duplexes_filtered_by_mapq" \
+            <<  "\t" << "duplexes_filtered_by_mismatch_rate"  << "\t" << "duplexes_filtered_by_base_quality_rate" << "\t" << "duplexes_filtered_by_edit_distance" \
+            << "\t" << "duplexes_filtered_by_clustered_errors" << "\t" << "duplexes_filtered_by_sclip" << "\t" << "duplexes_filtered_by_largefrag" << std::endl;
 
   std::cout << read_counter << "\t" << duplex_counter << "\t" << pass_counter << "\t" << errorstat.n_filtered_by_mapq << \
             "\t" << errorstat.n_filtered_pairmismatch_rate << "\t" << errorstat.n_filtered_q30rate << "\t" << \

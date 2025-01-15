@@ -1,5 +1,15 @@
+UPDATES
+
+*  (01/08/25) Version 1.1.4 introduces a new script `codec filter` designed to filter consensus BAM files. It retains only the reads and bases relevant for variant calling. Fragments (read-pairs) that do not pass fragment-level filtering are excluded from the output BAM. Bases that fail the filters are assigned a minimum base quality score (Q2), ensuring they are ignored by most coverage analysis and variant calling tools.
+   It can be run as the following:
+   
+   ``` codec filter -b mol_consensus.sorbybyname.bam -o duplex_only.bam -r reference.fa -q 30 -m 60 -Q 0.7 -B 0.5 -N 0.05 ...```
+> [!NOTE]
+> The input BAM file must be sorted by read name, and the output BAM will also be query-name sorted. For consistent filtering results, it is recommended to use the same parameters as those in codec call.
+
+
 # CODECsuite
-CODECsuite is the software to process the CODEC data. It has 3 core functions: demultiplexing, adapter trimming, and single fragment mutation calling (SFC), which are written in c++14. 
+The CODEC analysis pipeline, CODECsuite, comprises five key steps: demultiplexing, adapter trimming, alignment, duplicate collapsing, and single-fragment mutation calling. Duplicate collapsing and alignments are performed using the third-party tools Fgbio and BWA, respectively. After removing byproducts and applying fragment-level filtering, mutations were identified exclusively from duplexes in the overlapped regions, where bases from each read align and match. Bases within these regions underwent stringent filtering based on criteria such as base quality, proximity to fragment ends, overlap with germline mutations, and other factors. Notably, a single read pair is sufficient to form a duplex, as each read represents one strand. Refer to the [paper](https://www.nature.com/articles/s41588-023-01376-0) for more details. 
 
 ## Installation
 Tested on Red Hat 7 and Ubuntu 18.04
