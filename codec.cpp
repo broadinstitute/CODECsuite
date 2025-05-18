@@ -8,7 +8,7 @@
 #include <getopt.h>
 #include <cassert>
 #ifndef PACKAGE_VERSION
-#define PACKAGE_VERSION "1.1.4"
+#define PACKAGE_VERSION "1.1.5"
 #endif
 
 int codec_demux(int argc, char **argv);

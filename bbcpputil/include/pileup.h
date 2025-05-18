@@ -206,7 +206,7 @@ static int ScanIndel(PileHandler *input,
                       const std::string& seq,
                       bool  handle_overlap,
                       int wiggle,
-                      float germ_min_vaf,
+                      float nearby_germ_min_vaf,
                       int mindepth,
                       int minbq,
                       int &exact_match,
@@ -338,8 +338,8 @@ static int ScanIndel(PileHandler *input,
         secmaxbase = it.first;
       }
     }
-    if ((depth >= mindepth && max > 0 && maxbase != refbase[0] && max > d * germ_min_vaf) ||
-      (depth >= mindepth && secmax > 0 && secmaxbase != refbase[0] && secmax > d * germ_min_vaf)) {
+    if ((depth >= mindepth && max > 0 && maxbase != refbase[0] && max > d * nearby_germ_min_vaf) ||
+      (depth >= mindepth && secmax > 0 && secmaxbase != refbase[0] && secmax > d * nearby_germ_min_vaf)) {
     //  std::cerr << search << std::endl;
       fuzzy_match = 2;
       bam_mplp_destroy(mplp);
@@ -351,7 +351,7 @@ static int ScanIndel(PileHandler *input,
   return depth;
 }
 
-int GenotypeVariant(PileHandler *germbam,
+int GenotypeVariant(PileHandler *inputbam,
                            const SeqLib::RefGenome& ref,
                            const std::string& chrom,
                            int tpos,
@@ -375,15 +375,15 @@ int GenotypeVariant(PileHandler *germbam,
   int depth = 0;
   if (indel == 0) { // SNV
     int alt_count = 0;
-    depth = ScanAllele(germbam, chrom, tpos, seq[0],handle_overlap, alt_count, minbq);
+    depth = ScanAllele(inputbam, chrom, tpos, seq[0],handle_overlap, alt_count, minbq);
     if (depth == -1)
       return -2;
     if (depth >= mindepth && (float) alt_count >= germ_min_vaf * depth)
       return 0;
   } else {
     int exact_match = 0, fuzzy_match = 0;
-    depth = ScanIndel(germbam, false, ref, chrom, tpos, indel, seq, handle_overlap, wiggle,
-                      germ_min_vaf, mindepth, minbq, exact_match, fuzzy_match);
+    depth = ScanIndel(inputbam, false, ref, chrom, tpos, indel, seq, handle_overlap, wiggle,
+                      0.25, mindepth, minbq, exact_match, fuzzy_match);
     if (depth == -1)
       return -2;
     if (depth >= mindepth && (fuzzy_match > 1 || (float) exact_match >= germ_min_vaf * depth))

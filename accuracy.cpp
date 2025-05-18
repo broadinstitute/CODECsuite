@@ -670,7 +670,7 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
 
       int germ_support = 0, germ_depth = std::numeric_limits<int>::max();
       int site_depth = 0;
-      std::pair<string, string> qtxt = {"NA", "NA"};
+      std::tuple<string, string, string, string, string> qtxt = std::make_tuple("NA", "NA", "NA", "NA", "NA");
       if (var.isIndel() ) {// INDEL
         if (var.IndelLen() < opt.min_indel_len) {
           continue;
@@ -844,9 +844,9 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
         ++errorstat.nindel_error;
         errorstat.indel_nbase_error += abs((int) var.contig_seq.length() - (int) var.alt_seq.length());
         if (opt.count_read == 0 ) {
-          qtxt = cpputil::QualContext(var, seg, 3);
+          qtxt = cpputil::QualContext(var, seg, ref, 3);
         }
-        ferr << var << '\t' << aux_prefix << '\t' << qtxt.first << '\t' <<qtxt.second << "\t" << site_depth << "\t" << germ_depth << '\n';
+        ferr << var << '\t' << aux_prefix << '\t' << std::get<0>(qtxt) << '\t' << std::get<1>(qtxt) << "\t" << std::get<2>(qtxt) << "\t" << site_depth << "\t" << germ_depth << '\n';
       } else { // SNV
         if (var.var_qual < opt.bqual_min * var.read_count) {
           errorstat.snv_filtered_baseq += var.alt_seq.size();
@@ -974,9 +974,9 @@ void ErrorRateDriver(vector<cpputil::Segments>& frag,
         }
         nerr += var.alt_seq.size();
         if (opt.count_read == 0) {
-          qtxt = cpputil::QualContext(var, seg, 3);
+          qtxt = cpputil::QualContext(var, seg, ref, 3);
         }
-        ferr << var << '\t' << aux_prefix << '\t' <<  qtxt.first << '\t' <<qtxt.second << "\t" << site_depth << "\t" << germ_depth << '\n';
+        ferr << var << '\t' << aux_prefix << '\t' << std::get<0>(qtxt) << '\t' << std::get<1>(qtxt)  << "\t" << std::get<2>(qtxt) << "\t" << site_depth << "\t" << germ_depth << '\n';
       }
       if (opt.count_read == 2) {
         errorstat.nsnv_error += nerr * var.read_count;
@@ -1137,7 +1137,7 @@ int codec_accuracy(int argc, char ** argv) {
   std::ofstream readlevel;
   std::ofstream cyclelevel;
   string error_profile_header =
-      "chrom\tref_pos\tref\talt\ttype\tdist_to_fragend\tsnv_base_qual\tread_count\tread_name\tfamily_size\tnumN\tnumQpass\tclen\tflen\tqual3p\tqual5p\tsite_depth\tgerm_depth";
+      "chrom\tref_pos\tref\talt\ttype\tdist_to_fragend\tsnv_base_qual\tread_count\tread_name\tfamily_size\tnumN\tnumQpass\tdlen\tflen\tref_trimer\ttrimer_5p\ttrimer_3p\tsite_depth\tgerm_depth";
   ferr << "#" << cmdline << std::endl;
   ferr << error_profile_header << std::endl;
   if (not opt.known_var_out.empty()) {
