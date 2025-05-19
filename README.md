@@ -134,10 +134,10 @@ output.context_count.txt: trinucleotide context and dinucleotide context counts
 ```
 
 ## Reformatting CODEC SFC variant output into MAF or VCF format 
+Scripts `codec2maf` and `maf2vcf.py` can be found in folder `snakemake/script/`.  `maf2vcf.py` depends on `maf2vcf.pl` script from the perl package [mskcc/vcf2maf](https://github.com/mskcc/vcf2maf/tree/main)
 1. CODEC txt file To MAF: `codec2maf -i output.variatns_called.txt -o output.variatns_called.maf`
 2. MAF To VCF: `maf2vcf.py output.variatns_called.maf -r hg38.fa -o outdir -p /usr/bin/maf2vcf.pl`
 
-MAF to VCF conversion requires the `maf2vcf.pl` script from the perl package [mskcc/vcf2maf](https://github.com/mskcc/vcf2maf/tree/main)
 
 ## Other notes
 1. For CODEC-MSI please refer to [msi](./msi). And by default CMAKE will not build CODEC-MSI. Please uncomment the last two
