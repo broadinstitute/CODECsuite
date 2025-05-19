@@ -1,4 +1,6 @@
 UPDATES
+* (05/19/25) Version 1.1.5 introduces new scripts for converting CODEC single fragment duplex variants output to MAF or VCF format.
+  [See details here](Reformatting-CODEC-SFC-variant-output-into-MAF-or-VCF-format)
 
 *  (01/08/25) Version 1.1.4 introduces a new script `codec filter` designed to filter consensus BAM files. It retains only the reads and bases relevant for variant calling. Fragments (read-pairs) that do not pass fragment-level filtering are excluded from the output BAM. Bases that fail the filters are assigned a minimum base quality score (Q2), ensuring they are ignored by most coverage analysis and variant calling tools.
    It can be run as the following:
@@ -88,6 +90,9 @@ ql: the rest of 3' adapter quality scores
 After adapter trimming. The codec reads can be mapped by standard NGS tools such as BWA. For our end-to-end pipeline 
 please see [snakemake](./snakemake).
 
+> [!NOTE]
+> We recommend using SMaHT duplex reference genome which is basically HG38 without decoy sequences. See reasons here: https://smaht-dac.github.io/pipelines-docs/DOCS/REFERENCE_FILES/Genome_Builds/1_Build_GRCh38.html
+
 ## Single fragment caller (SFC) and mutation rate computation
 
 After GATK best practice (alignment, markduplicate, indel realignment)  for example. Of note, BQSR should NOT be run for 
@@ -95,9 +100,11 @@ CODEC data since CODEC has a different quality score distribution. I do not reco
 Illumina sequencers' quality scores having been improved and BQSR almost doubles the bam size.
 
 Now, we can run SFC to call mutations. SFC is designed to call somatic mutations. For the best results, we need to have
-a bed file which contains the high confident regions (e.g., [this](https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/release/genome-stratifications/v3.1/GRCh37/LowComplexity/GRCh37_notinAllTandemRepeatsandHomopolymers_slop5.bed.gz)) in the reference genome and a germline bam for masking the germline 
-variants. If there is no germline bam, it is recommend to have a germline vcf file. The population based vcf (e.g., [dbsnp](https://data.broadinstitute.org/snowman/hg19/Homo_sapiens_assembly19.dbsnp.vcf)) is almost
-surely recommended since it can account for contamination and low sequencing depth of germline bam. There is a set of 
+a bed file which contains the high confident regions (e.g., [this](https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/release/genome-stratifications/v3.3/GRCh38@all/LowComplexity/GRCh38_notinAllTandemRepeatsandHomopolymers_slop5.bed.gz)) in the reference genome and a germline bam for masking the germline 
+variants. If there is no germline bam, it is recommend to have a germline vcf file. The population based vcf (e.g., [gnomad vcf](https://storage.googleapis.com/gatk-best-practices/somatic-hg38/af-only-gnomad.hg38.vcf.gz)) is almost
+surely recommended since it can account for contamination and low sequencing depth of germline bam. However, to avoid over-filtering true somatic mutations, a minimum allele frequency threshold is recommend for the population vcf (e.g., 0.01%)
+
+There is a set of 
 fragment level and base level filters to improve the precision of the mutation calls at the cost of data loss and potential
 loss of real mutations. Depends on the applications, we have presets of parameters: `-p/--preset`
 ```
@@ -115,7 +122,7 @@ themselves. Trimming the end `-d 12` and use Q30 cutoff `-q 30` is always recomm
 the most effective parameter is probably `-Q/--min_passQ_frac`: the fraction of Q30+Q30 bases in the overlap region. The fraction essentially
 measures the cluster quality, which is important for single fragment calling. Some examples of running SFC
 ```
-codec call -b input.mark_duplicated.bam -L highconfidentregions.bed  -r hg19.fa -n germline.bam -p lenient -o output
+codec call -b input.mark_duplicated.bam -L highconfidentregions.bed  -r hg38.fa -n germline.bam -p lenient -o output
 
 ```
 
@@ -125,6 +132,12 @@ output.mutation_metrics.txt: includes SNV_rate, INDEL_rate and etc.
 output.variatns_called.txt: mutations from single fragments
 output.context_count.txt: trinucleotide context and dinucleotide context counts
 ```
+
+## Reformatting CODEC SFC variant output into MAF or VCF format 
+1. CODEC txt file To MAF: `codec2maf -i output.variatns_called.txt -o output.variatns_called.maf`
+2. MAF To VCF: `maf2vcf.py output.variatns_called.maf -r hg38.fa -o outdir -p /usr/bin/maf2vcf.pl`
+
+MAF to VCF conversion requires the `maf2vcf.pl` script from the perl package [mskcc/vcf2maf](https://github.com/mskcc/vcf2maf/tree/main)
 
 ## Other notes
 1. For CODEC-MSI please refer to [msi](./msi). And by default CMAKE will not build CODEC-MSI. Please uncomment the last two
