@@ -1,6 +1,6 @@
 UPDATES
 * (05/19/25) Version 1.1.5 introduces new scripts for converting CODEC single fragment duplex variants output to MAF or VCF format.
-  [See details here](Reformatting-CODEC-SFC-variant-output-into-MAF-or-VCF-format)
+  [See details here](#reformatting-codec-sfc-variant-output-into-maf-or-vcf-format)
 
 *  (01/08/25) Version 1.1.4 introduces a new script `codec filter` designed to filter consensus BAM files. It retains only the reads and bases relevant for variant calling. Fragments (read-pairs) that do not pass fragment-level filtering are excluded from the output BAM. Bases that fail the filters are assigned a minimum base quality score (Q2), ensuring they are ignored by most coverage analysis and variant calling tools.
    It can be run as the following:
