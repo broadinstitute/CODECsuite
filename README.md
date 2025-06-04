@@ -133,6 +133,9 @@ output.variatns_called.txt: mutations from single fragments
 output.context_count.txt: trinucleotide context and dinucleotide context counts
 ```
 
+> [!NOTE]
+> All CODEC related resources can be found at https://console.cloud.google.com/storage/browser/codec_cloud_resources. Including the population based vcf: https://storage.googleapis.com/codec_cloud_resources/alfa_all.freq.breakmulti.hg38.af0001.vcf.gz
+
 ## Reformatting CODEC SFC variant output into MAF or VCF format 
 Scripts `codec2maf` and `maf2vcf.py` can be found in folder `snakemake/script/`.  `maf2vcf.py` depends on `maf2vcf.pl` script from the perl package [mskcc/vcf2maf](https://github.com/mskcc/vcf2maf/tree/main)
 1. CODEC txt file To MAF: `codec2maf -i output.variatns_called.txt -o output.variatns_called.maf`
