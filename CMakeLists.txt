@@ -55,8 +55,7 @@ link_directories(${SEQLIB_ROOT}/lib/)
 ## not currently used. But reserve for denovo consensus
 
 set(deps bbcpputil/cpp/AlignmentConsensus.cpp bbcpputil/cpp/BamRecordExt.cpp)
-set(subcommand demux.cpp trimadapter.cpp duplex_filter.cpp accuracy.cpp
-        bbcpputil/include/FastxIO.h)
+set(subcommand demux.cpp trimadapter.cpp duplex_filter.cpp accuracy.cpp)
 if (CMAKE_BUILD_TYPE MATCHES Debug)
     message(" ")
     message("CMAKE IN DEBUG MODE")
