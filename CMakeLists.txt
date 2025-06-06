@@ -56,7 +56,7 @@ link_directories(${SEQLIB_ROOT}/lib/)
 
 set(deps bbcpputil/cpp/AlignmentConsensus.cpp bbcpputil/cpp/BamRecordExt.cpp)
 set(subcommand demux.cpp trimadapter.cpp duplex_filter.cpp accuracy.cpp
-        bbcpputil/include/FastxIO2.h)
+        bbcpputil/include/FastxIO.h)
 if (CMAKE_BUILD_TYPE MATCHES Debug)
     message(" ")
     message("CMAKE IN DEBUG MODE")
