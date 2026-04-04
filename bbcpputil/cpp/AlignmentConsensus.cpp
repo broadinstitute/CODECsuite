@@ -229,7 +229,7 @@ std::pair<std::string, std::string> PairConsensus(const Segments &segs, const st
         if (trim_overhang) qual_pileup[1][jj] = static_cast<char>(35);
       }
     } else { // not overhang
-      // paired baseq calibration. If one of the baseq < cutoff, make all baseq low enough so that VC will ingnore them
+      // paired baseq calibration. If one of the baseq < cutoff, make all baseq low enough (=2) so that VC will ingnore them
       if (dna_pileup[0][jj] >= 'A' && dna_pileup[1][jj] >= 'A'
           && std::min(qual_pileup[0][jj], qual_pileup[1][jj]) < static_cast<char>(33 + qcutoff)) {
         qual_pileup[0][jj] = static_cast<char>(35);

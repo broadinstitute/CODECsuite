@@ -1,0 +1,137 @@
+#!/usr/bin/env Rscript
+library(optparse)
+
+option_list = list(
+  make_option(c("-i", "--inputmaf"), type="character", default=NULL, 
+              help="input data"),
+  make_option(c("-o", "--outputmaf"), type="character", default=NULL, 
+              help="output file name"),
+  make_option(c("-Q", "--q60frac"), type="double", default=0.0, 
+              help="min q60frac [default= %default]"),
+  make_option(c("-N", "--Nfrac"), type="double", default=1.0, 
+              help="max N frac [default= %default]"),
+  make_option(c("-L", "--minIndelFragLen"), type="integer", default=0, 
+              help="minimum fraglen when containing indels [default= %default]"),
+  make_option(c("-l", "--maxIndelLen"), type="integer", default=50, 
+              help="maximum small indel len [default= %default]"),
+  make_option(c("-D", "--minIndelDist2End"), type="integer", default=0, 
+              help="minimum distance of a indel to the fragend [default= %default]"),
+  make_option(c("-b", "--breakmnv"), action="store_true", default=FALSE,
+              help="break the MNV to SNV [default %default]"),
+  make_option(c("-p", "--pairedOnly"), action="store_true", default=FALSE,
+              help="only include paired reads"),
+  make_option(c("-f", "--countByFragId"), action="store_true", default=FALSE,
+              help="count by fragment id: (frag_len, dist_to_fragend). This is to avoid artifact fragments due to UMI it won't work for ddBTP data")
+
+); 
+ 
+opt_parser = OptionParser(option_list=option_list);
+opt = parse_args(opt_parser);
+
+if (is.null(opt$inputmaf)){
+  print_help(opt_parser)
+  stop("At least one argument must be supplied (input file).n", call.=FALSE)
+}
+
+library(data.table)
+library(tidyverse)
+
+break_mnv <- function(mut_fam_df, snv_only=FALSE) {
+  indel = mut_fam_df %>% filter(type != "SNV")
+  mut_fam_df = mut_fam_df %>% filter(type == "SNV")
+  snv = mut_fam_df %>% filter(nchar(ref) == 1)
+  mnv = mut_fam_df %>% filter(nchar(ref) > 1)
+  mnv2snv = data.frame()
+  if (nrow(mnv) > 0) {
+    for (i in 1:nrow(mnv)) {
+      for (j in 1:nchar(mnv[i,]$ref)) {
+        tmp = mnv[i,]
+        tmp$ref = substr(mnv[i,]$ref, j, j)
+        tmp$alt = substr(mnv[i,]$alt, j, j)
+        tmp$ref_pos = mnv[i,]$ref_pos + j - 1
+        mnv2snv = rbind(mnv2snv, tmp)
+      }  
+    }
+  }
+  if (snv_only) {
+    rbind(snv, mnv2snv) 
+  }
+  else {
+    rbind(snv, mnv2snv, indel) 
+  }
+}
+
+add_varid <- function(df) {
+  if ("Chromosome" %in% colnames(df)) {
+    df = df %>% mutate(id = paste(Chromosome, Start_Position, Reference_Allele, Tumor_Seq_Allele2, sep="_")) 
+  } else if ("chrom" %in% colnames(df)) {
+    df = df %>% mutate(id = paste(chrom, ref_pos, ref, alt, sep="_")) 
+  }
+  df
+}
+
+convert_chr_to_numeric <- function(chr) {
+  chr <- gsub("chr", "", chr)  # Remove the "chr" prefix
+  
+  # Convert special cases
+  if (chr == "X") return(23)
+  if (chr == "Y") return(24)
+  if (chr == "M") return(25)
+  
+  return(as.numeric(chr))  # For numbered chromosomes, convert to numeric
+}
+
+codec2maf <- function(infile, outfile, q60rate, Nrate, min_frag_indel, min_dist_indel, max_indel_len, breakmnv, pairedOnly, countByFragId) {
+    codec = fread(infile)
+    print(paste(nrow(codec %>% filter(type != "SNV")), "frag contains INDEL"))
+    print(paste(nrow(codec %>% filter(type == "SNV")), "frag contains SNV"))
+    #codec = codec %>% filter(numQ60/olen >= q60rate & numN/flen <= Nrate)
+    if (pairedOnly) {
+        codec = codec %>% filter(flen != 0)
+    }
+    codec = codec %>% filter(numQpass/clen >= q60rate & (flen == 0 | numN/flen <= Nrate))
+    codec = codec %>% filter(type == "SNV" | (flen >= as.integer(min_frag_indel)))
+    codec = codec %>% filter(type == "SNV" | (dist_to_fragend >= as.integer(min_dist_indel)))
+    codec = codec %>% mutate(fragid = paste0(flen, "_", dist_to_fragend))
+    codec = codec %>% filter(nchar(ref) <= max_indel_len & nchar(alt) <= max_indel_len)
+    print(paste(nrow(codec %>% filter(type != "SNV")), "frag contains INDEL after filtering"))
+    print(paste(nrow(codec %>% filter(type == "SNV")), "frag contains SNV after filtering"))
+    if (breakmnv) {
+        codec = break_mnv(codec)
+    }
+    codec = add_varid(codec)
+    print(head(codec))
+    if (countByFragId) {
+        codec = codec %>% group_by(id) %>% summarise(chrom = unique(chrom), 
+                                                       ref_pos = unique(ref_pos), 
+                                                       ref = unique(ref),
+                                                       alt = unique(alt),
+                                                       type = unique(type),
+                                                       t_alt_count=length(unique(fragid)),
+                                                       t_ref_count=unique(site_depth))
+    } else {
+        codec = codec %>% group_by(id) %>% summarise(chrom = unique(chrom), 
+                                                       ref_pos = unique(ref_pos), 
+                                                       ref = unique(ref),
+                                                       alt = unique(alt),
+                                                       type = unique(type),
+                                                       t_alt_count=length(unique(read_name)),
+                                                       t_ref_count=unique(site_depth))
+    }
+    codec = codec[, 2:ncol(codec)]
+    codec$chrid = sapply(codec$chrom, convert_chr_to_numeric)
+    codec = arrange(codec, chrid, ref_pos)
+    codec = codec[, 1:(ncol(codec) - 1)]
+    colnames(codec)[1:5] = c("Chromosome", "Start_Position", "Reference_Allele", "Tumor_Seq_Allele2", "Variant_Type")
+    codec = codec %>% mutate(Variant_Type = ifelse(Variant_Type=="SNV", "SNP", Variant_Type))
+    codec$Hugo_Symbol = "Unknown"
+    codec$Tumor_Sample_Barcode = "TUMOR"
+    #codec$tumor_f=0.5
+    codec = codec %>% mutate(t_ref_count = t_ref_count - t_alt_count)
+    codec = codec %>% select("Hugo_Symbol", "Chromosome", "Start_Position", "Reference_Allele", "Tumor_Seq_Allele2", "Variant_Type", "Tumor_Sample_Barcode", "t_alt_count", "t_ref_count")
+    write_tsv(codec, outfile)
+    print(paste(nrow(codec %>% filter(Variant_Type == "SNP")), "snvs write to", outfile))
+    print(paste(nrow(codec %>% filter(Variant_Type != "SNP")), "indels write to", outfile))
+}
+
+codec2maf(opt$inputmaf, opt$outputmaf, opt$q60frac, opt$Nfrac, opt$minIndelFragLen, opt$minIndelDist2End, opt$maxIndelLen, opt$breakmnv, opt$pairedOnly, opt$countByFragId)
