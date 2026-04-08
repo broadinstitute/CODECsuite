@@ -1,4 +1,6 @@
 UPDATES
+* (04/08/26) A Dockerfile `Dockerfile-UpdateJun2025` has been added, and you can aslo pull the Docker image using: `docker pull \
+    us.gcr.io/tag-public/codec_dependencies_docker:v1.1.5`
 * (05/19/25) Version 1.1.5 introduces new scripts for converting CODEC single fragment duplex variants output to MAF or VCF format.
   [See details here](#reformatting-codec-sfc-variant-output-into-maf-or-vcf-format)
 
